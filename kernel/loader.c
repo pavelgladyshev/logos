@@ -174,7 +174,7 @@ static int apply_relocations(uint32_t ino, Elf32_Ehdr *ehdr, uint32_t load_bias)
 /*
  * Load an ELF executable at a specified base address
  */
-int elf_load_at(const char *path, uint32_t load_addr, struct program_info *info)
+int elf_load_at(const char *path, uint32_t load_addr, uint32_t max_size, struct program_info *info)
 {
     uint32_t ino;
     int result;
@@ -257,7 +257,7 @@ int elf_load_at(const char *path, uint32_t load_addr, struct program_info *info)
         if (seg_addr < load_addr) {
             return LOAD_ERR_BAD_ADDR;
         }
-        if (seg_addr + phdr.p_memsz > load_addr + PROGRAM_MAX_SIZE) {
+        if (seg_addr + phdr.p_memsz > load_addr + max_size) {
             return LOAD_ERR_TOO_LARGE;
         }
 
@@ -306,7 +306,7 @@ int elf_load_at(const char *path, uint32_t load_addr, struct program_info *info)
  */
 int elf_load(const char *path, struct program_info *info)
 {
-    return elf_load_at(path, PROGRAM_LOAD_ADDR, info);
+    return elf_load_at(path, PROGRAM_LOAD_ADDR, PROGRAM_MAX_SIZE, info);
 }
 
 /*

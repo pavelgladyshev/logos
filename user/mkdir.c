@@ -12,7 +12,7 @@ int main(int argc, char *argv[]) {
     int result;
 
     if (argc < 2) {
-        puts("usage: mkdir <path>\n");
+        puts("usage: mkdir <path>");
         return 1;
     }
 

@@ -8,30 +8,13 @@
 
 #include "types.h"
 #include "trap.h"
+#include "syscall_nr.h"  /* SYS_exit, SYS_read, ... */
 
-/* System call numbers */
-#define SYS_exit    0
-#define SYS_read    1
-#define SYS_write   2
-#define SYS_open    3
-#define SYS_close   4
-#define SYS_exec    5
-#define SYS_readdir 6
-#define SYS_mkdir   7
-#define SYS_rmdir   8
-#define SYS_mknod   9
-#define SYS_setenv   10
-#define SYS_getenv   11
-#define SYS_unsetenv      12
-#define SYS_getenv_count  13
-#define SYS_getenv_entry  14
-#define SYS_chdir         15
-
-/* Maximum number of arguments for exec syscall */
+/* Maximum number of arguments for spawn syscall */
 #define MAX_ARGC    8
 #define MAX_ARG_LEN 64
 
-/* Maximum number of environment variables for exec syscall */
+/* Maximum number of environment variables for spawn syscall */
 #define MAX_ENVC    16
 #define MAX_ENV_LEN 64
 
@@ -49,34 +32,13 @@ struct fd_entry {
 };
 
 /*
- * Initialize the syscall subsystem.
- * Sets up fd table with stdin/stdout/stderr pointing to console.
- */
-void syscall_init(void);
-
-/*
  * Dispatch a system call based on trap frame contents.
  * Called from c_trap_handler when mcause indicates ecall.
- * Returns 1 if program should exit, 0 otherwise.
+ * Returns 1 if top-level program should exit, 0 otherwise.
+ *
+ * Note: sys_spawn and sys_exit may call trap_ret() directly
+ * and never return to this function.
  */
 int syscall_dispatch(trap_frame_t *tf);
-
-/*
- * Get the exit code from sys_exit.
- * Valid only after syscall_dispatch returns 1.
- */
-int syscall_get_exit_code(void);
-
-/*
- * Initialize the kernel environment with default values.
- * Called once at boot.
- */
-void syscall_env_init(void);
-
-/*
- * Set a kernel environment variable from within the kernel.
- * Used to store exit code in "?" before reloading shell.
- */
-void syscall_set_env(const char *name, const char *value);
 
 #endif /* SYSCALL_H */

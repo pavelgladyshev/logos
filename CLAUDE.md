@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A bare-metal Unix-like kernel for RISC-V with system call support, designed to run on a simulated RISC-V computer (Logisim). Implements block-based storage, inode-based file management (max 32 inodes), directory support with path traversal, a character device driver framework, position-independent executable loading, and a system call interface for user programs.
+A bare-metal Unix-like OS for RISC-V, designed to run on a simulated RISC-V computer (Logisim). Uses a three-stage boot process (bootloader → kernel → shell): a ROM bootloader loads the kernel from the filesystem into RAM, the kernel initializes subsystems and loads the shell, and the shell provides an interactive command-line interface. Implements block-based storage, inode-based file management (max 32 inodes), directory support with path traversal, a character device driver framework, position-independent executable loading, and a system call interface for user programs.
 
 ## Build Commands
 
 ```bash
-make                      # Build kernel ROM image (fs-rom.txt)
-make all                  # Build everything: fs-rom.txt, fstool, hello.elf, filesystem image
+make                      # Build bootloader ROM image (boot-rom.txt)
+make all                  # Build everything: boot-rom.txt, kernel.bin, user programs, filesystem image
 make fstool               # Build native fstool utility for host system
 make fs-image             # Create filesystem image (block_storage.bin)
 make user-programs        # Build all user programs
@@ -39,14 +39,20 @@ make qemu                 # Run in QEMU with serial console
 make qemu-gdb             # Run in QEMU, wait for GDB at localhost:1234
 ```
 
-Note: Before running Logisim without GUI, you must first load compiled code into the ROM via the GUI and save the circuit.
+Note: Before running Logisim without GUI, you must first load the bootloader ROM image (`boot-rom.txt`) into the ROM component and the filesystem image (`block_storage.bin`) into the block device via the GUI, then save the circuit.
 
 ## Architecture
 
-All source files are in the root directory. Key modules:
+Key modules organized by directory:
 
 | Layer | Files | Purpose |
 |-------|-------|---------|
+| **Bootloader** (`boot/`) | | |
+| Boot Entry | `boot_crt0.S`, `boot.lds` | CPU reset entry point, bootloader linker script |
+| Boot Main | `boot_main.c` | Loads kernel binary from filesystem into RAM |
+| Boot I/O | `boot_io.c` | Block device DMA read for bootloader |
+| Boot FS | `boot_fs.c`, `boot_string.c` | Minimal read-only filesystem traversal |
+| **Kernel** (`kernel/`) | | |
 | Block I/O | `block.c/h` | Memory-mapped block device access, bitmap operations |
 | Inode | `inode.c/h` | Read/write inodes, allocate/free, metadata queries |
 | Directory | `dir.c/h` | Directory entry lookup, add/remove entries, mkdir/rmdir |
@@ -54,11 +60,16 @@ All source files are in the root directory. Key modules:
 | Filesystem | `fs.c/h` | Format, mount, open paths (absolute), superblock access |
 | Device | `device.c/h`, `console_dev.c/h` | Character device driver framework, console driver |
 | Trap Handling | `trap.S`, `trap.h` | Assembly trap handler, context save/restore |
-| System Calls | `syscall.c/h` | Syscall dispatch, file descriptor table |
+| Process Mgmt | `process.c/h` | Process table, slot allocation, per-process state |
+| System Calls | `syscall.c/h`, `syscall_nr.h` | Syscall dispatch, per-process file descriptors |
 | ELF Loader | `loader.c/h`, `loader_asm.S`, `elf.h` | Load ELF programs at arbitrary addresses |
-| Kernel Runtime | `crt0.S`, `main.c` | Kernel entry point, initialization |
+| Kernel Entry | `crt0.S`, `kernel.lds` | Kernel entry point (in RAM), kernel linker script |
+| Kernel Main | `main.c` | Kernel initialization and shell restart loop |
+| **User** (`user/`) | | |
 | User Runtime | `user_crt0.S`, `user.lds` | User program startup, linker script |
-| User Library | `user/libc.c/h`, `user/syscall.S` | User-space libc with syscall wrappers |
+| User Library | `libc.c/h`, `syscall.S` | User-space libc with syscall wrappers |
+| Shell | `shell.c` | Interactive shell (`/bin/sh`) |
+| **Host Tools** | | |
 | Host Tool | `fstool.c`, `native_block.c` | Native utility to manage filesystem images |
 
 **Filesystem Layout (256 blocks × 512 bytes):**
@@ -68,12 +79,71 @@ All source files are in the root directory. Key modules:
 - Remaining: Data blocks
 
 **Memory Layout (Logisim):**
-- 0x00000000: ROM (kernel code)
-- 0x00100000: RAM start
-- 0x00110000: Default program load address
-- 0x001FFF00: Program stack top
+- 0x00000000-0x0000FFFF: ROM (64KB) — bootloader code (`boot_crt0.S` + `boot_main.c`)
+- 0x00100000-0x0010FFFF: RAM — kernel code/data/BSS (loaded by bootloader from `/boot/kernel`)
+- 0x00110000-0x0018FFFF: Process memory slots (8 × 64KB)
+  - Slot 0: 0x00110000-0x0011FFFF (shell)
+  - Slot 1: 0x00120000-0x0012FFFF
+  - ...
+  - Slot 7: 0x00180000-0x0018FFFF
+- 0x001F0000-0x001FEFFF: Bootloader BSS (60KB, used only during boot)
+- 0x001FFFFC: Initial stack pointer (shared by bootloader and kernel)
 - 0x00200000: Block device MMIO
-- 0xFFFF000C: Console MMIO
+- 0xFFFF0004/0008: Console input MMIO (receiver control/data)
+- 0xFFFF000C: Console output MMIO
+
+Each 64KB slot holds code + data + BSS + stack (stack grows down from slot top - 0x100).
+
+## Boot Process
+
+The system uses a three-stage boot: **Bootloader → Kernel → Shell**.
+
+### Stage 1: Bootloader (ROM)
+
+On CPU reset, execution starts at address `0x00000000` in ROM (`boot/boot_crt0.S`):
+
+1. Set stack pointer to `0x001FFFFC` (top of RAM)
+2. Zero bootloader BSS at `0x001F0000` (placed high to avoid collision with kernel)
+3. Call `boot_main()` which:
+   - Reads the superblock (block 0) from the block device, validates filesystem magic
+   - Resolves path `/boot/kernel` by walking the directory tree from root inode
+   - DMA-copies the kernel binary's data blocks directly into RAM at `0x00100000`
+   - Jumps to `0x00100000` via function pointer (never returns)
+
+The bootloader has its own minimal filesystem implementation (`boot_fs.c`, `boot_io.c`) — just enough to read files. Its BSS lives at `0x001F0000` so the kernel load at `0x00100000` doesn't overlap.
+
+### Stage 2: Kernel Initialization (RAM)
+
+The kernel entry point (`kernel/crt0.S`) runs at `0x00100000`:
+
+1. Set stack pointer to `0x001FFFFC`, zero kernel BSS
+2. Call `main()` which performs initialization in this order:
+   - `console_dev_init()` — register console character device driver (major 1)
+   - `proc_init()` — initialize 8 process slots with fixed memory addresses
+   - `fs_mount()` — read superblock, make filesystem accessible
+3. Enter shell restart loop (runs forever):
+   - Allocate process slot 0, init environment (`PATH=/bin`, `CWD=/`)
+   - `elf_load_at("/bin/sh", 0x110000, ...)` — load shell ELF into slot 0
+   - Set up trap frame (entry point, stack, fds 0/1/2 → console)
+   - Install trap handler via `mtvec`/`mscratch` CSRs
+   - `run_user_program()` — save kernel context, `mret` to shell's `_start`
+   - *(blocks here until shell calls `sys_exit`)*
+   - Print exit code, free slot, loop back to reload shell
+
+### Stage 3: Shell
+
+The shell's `_start` (`user/user_crt0.S`) calls `main()` in `user/shell.c`, which enters an interactive command loop displaying `CWD$ ` prompt.
+
+When the shell exits (user types `exit`):
+- `sys_exit` detects no parent process (`parent == -1`)
+- Assembly restores kernel context saved by `run_user_program()`
+- `main()` resumes, prints `"[ exit() code X, reloading shell... ]"`, and restarts the shell
+
+### Build Artifacts
+
+- `boot-rom.txt` — Bootloader ROM image (loaded into Logisim ROM component)
+- `kernel.bin` — Flat kernel binary (stored at `/boot/kernel` in the filesystem image)
+- `block_storage.bin` — Filesystem image (loaded into Logisim block device) containing `/boot/kernel`, `/bin/sh`, and other user programs
 
 ## System Call Interface
 
@@ -89,22 +159,41 @@ User programs communicate with the kernel via the `ecall` instruction. The sysca
 | 2 | sys_write | a0=fd, a1=buf, a2=len | Write to file descriptor |
 | 3 | sys_open | a0=path, a1=flags | Open file, return fd (supports relative paths) |
 | 4 | sys_close | a0=fd | Close file descriptor |
-| 5 | sys_exec | a0=path, a1=argv, a2=envp | Replace program with new executable (envp updates kernel env if non-NULL) |
+| 5 | sys_spawn | a0=path, a1=argv, a2=envp | Launch child in new slot with inherited env; returns child's exit code (envp overrides child's env if non-NULL) |
 | 6 | sys_readdir | a0=path, a1=buf, a2=max | List directory entries |
 | 7 | sys_mkdir | a0=path | Create a directory |
 | 8 | sys_rmdir | a0=path | Remove an empty directory |
 | 9 | sys_mknod | a0=path, a1=major, a2=minor | Create a device node |
-| 10 | sys_setenv | a0=name, a1=value | Set kernel environment variable |
-| 11 | sys_getenv | a0=name, a1=buf, a2=buflen | Get kernel environment variable |
-| 12 | sys_unsetenv | a0=name | Remove kernel environment variable |
-| 13 | sys_getenv_count | (none) | Return number of kernel env variables |
-| 14 | sys_getenv_entry | a0=index, a1=buf, a2=buflen | Get Nth env entry as "KEY=value" |
+| 10 | sys_setenv | a0=name, a1=value | Set environment variable in current process |
+| 11 | sys_getenv | a0=name, a1=buf, a2=buflen | Get environment variable from current process |
+| 12 | sys_unsetenv | a0=name | Remove environment variable from current process |
+| 13 | sys_getenv_count | (none) | Return number of env variables in current process |
+| 14 | sys_getenv_entry | a0=index, a1=buf, a2=buflen | Get Nth env entry as "KEY=value" from current process |
 | 15 | sys_chdir | a0=path | Change current working directory |
 
 **Pre-opened file descriptors:**
 - fd 0: stdin (console device)
 - fd 1: stdout (console device)
 - fd 2: stderr (console device)
+
+## Process Model
+
+Each program runs in its own fixed 64KB memory slot with a per-process trap frame, file descriptors, and PID. No preemptive multitasking — only one process runs at a time.
+
+**Process states:**
+- `PROC_FREE` (0) — slot available
+- `PROC_RUNNING` (1) — currently executing on CPU
+- `PROC_READY` (2) — parent suspended while child runs
+
+**spawn() semantics:** `spawn()` loads the child into a **new** process slot (caller's memory is preserved). The parent is suspended (`PROC_READY`) while the child runs. When the child calls `exit()`, the parent resumes with the child's exit code as `spawn()`'s return value. This means `spawn()` returns on both success and failure:
+- **>= 0**: Child ran and exited with this code
+- **< 0**: Loading failed (error code)
+
+**Context switching:** `sys_spawn` and `sys_exit` call `trap_ret()` directly to switch between processes (non-local jump via `mret`). The trap stack is reset on each trap entry, so no stack leak occurs.
+
+**Shell survives spawn:** The shell stays in memory (slot 0) while external commands run in higher slots. Nested spawn is supported (e.g., shell → spawn_demo → hello uses slots 0, 1, 2).
+
+**Environment:** Per-process, stored in `struct process`. Each process has its own `env[MAX_ENVC][MAX_ENV_LEN]` array. On `spawn()`, the child inherits a copy of the parent's environment. Changes to env in a child do not affect the parent (Unix semantics). CWD is also per-process.
 
 ## Writing User Programs
 
@@ -124,24 +213,24 @@ The user library provides:
 - **I/O functions**: `putchar()`, `puts()`, `printf()`, `getchar()`, `gets()`, `read()`, `write()`
 - **File operations**: `open()`, `close()`
 - **Directory operations**: `readdir()`, `mkdir()`, `rmdir()`, `mknod()`
-- **Program control**: `exit()`, `exec()`, `execve()`, `chdir()`
+- **Program control**: `exit()`, `spawn()`, `spawnve()`, `chdir()`
 - **Environment**: `setenv()`, `unsetenv()`, `env_count()`, `getenv()`, `getenv_r()`, `getenv_entry()`, `env_to_envp()`
 - **String functions**: `strlen()`, `strcmp()`, `strncmp()`, `strcpy()`, `strncpy()`, `strchr()`
 - **Memory functions**: `memset()`, `memcpy()`, `memcmp()`
 
 Build produces user programs that are added to the filesystem image:
 - `/bin/hello` — Hello world demo
-- `/bin/exec_demo` — Demonstrates `exec()` syscall
-- `/bin/sh` — Interactive shell (kernel boots into this)
+- `/bin/spawn_demo` — Demonstrates `spawn()` syscall
+- `/bin/sh` — Interactive shell (loaded by kernel after boot)
 - `/bin/ls` — List directory contents
 - `/bin/mkdir` — Create directories
 - `/bin/rmdir` — Remove empty directories
 - `/bin/mknod` — Create device nodes
-- `/bin/demo_env` — Demonstrates environment variable API
+- `/bin/env_demo` — Demonstrates environment variable API
 
 ## Interactive Shell
 
-The kernel boots directly into an interactive shell (`/bin/sh`). Available commands:
+After the bootloader loads the kernel and the kernel initializes, it loads `/bin/sh` from the filesystem into process slot 0. Available commands:
 
 ```bash
 $ help                  # Show available commands
@@ -169,11 +258,11 @@ The shell supports:
 - Current working directory (`cd`, CWD shown in prompt)
 - Relative paths in all file operations (resolved against CWD)
 - Environment variables (`set`, `unset`, `$VAR`, `${VAR}`, and `$?` expansion)
-- Persistent environment: variables survive shell restarts (stored in kernel)
+- Per-process environment: child programs inherit a copy, changes don't affect parent (Unix semantics)
 - PATH-based command lookup (default: `PATH=/bin`)
-- Running external programs via `exec()` (environment inherited from kernel)
+- Running external programs via `spawn()` (child runs in separate memory slot, shell preserved)
 - Exit status tracking (`$?` holds last program's exit code)
-- Automatic shell restart after program exit
+- Automatic shell restart after `exit` command
 
 **Important for position-independent code:**
 - Use `-fno-jump-tables` to prevent switch statements from generating absolute address jump tables
@@ -192,7 +281,10 @@ Update the `RISCV_TOOL_PREFIX` variable in the Makefile if your toolchain is in 
 
 ## Target Configuration
 
-- **Logisim**: RV32IM_Zicsr, ILP32 ABI, uses `logisim.lds` (ROM at 0x0, RAM at 0x00100000)
+- **Logisim**: RV32IM_Zicsr, ILP32 ABI
+  - Bootloader: `boot/boot.lds` (ROM at 0x0, BSS at 0x001F0000)
+  - Kernel: `kernel/kernel.lds` (loaded at 0x00100000)
+  - User programs: `user/user.lds` (linked at address 0, relocated at load time)
 - The `zicsr` extension is required for CSR instructions used in trap handling
 
 ## Known PIE Limitations

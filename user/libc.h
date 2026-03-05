@@ -40,19 +40,18 @@ int open(const char *path, int flags);
 /* Close a file descriptor */
 int close(int fd);
 
-/* Replace current program with a new one (with environment)
+/* Spawn a child program in a new process slot (with environment)
  * path: path to executable
  * argv: NULL-terminated array of argument strings
- * envp: NULL-terminated array of "KEY=value" strings (or NULL)
- * On success: does not return
- * On failure: returns negative error code
+ * envp: NULL-terminated array of "KEY=value" strings (or NULL to inherit)
+ * Returns child's exit code (>= 0) on success, negative on failure
  */
-int execve(const char *path, char *const argv[], char *const envp[]);
+int spawnve(const char *path, char *const argv[], char *const envp[]);
 
-/* Replace current program (inherits no environment)
- * Convenience wrapper: calls execve(path, argv, NULL)
+/* Spawn a child program (inherits parent's environment)
+ * Convenience wrapper: calls spawnve(path, argv, NULL)
  */
-int exec(const char *path, char *const argv[]);
+int spawn(const char *path, char *const argv[]);
 
 /* Change the current working directory.
  * Returns 0 on success, negative error on failure.
@@ -92,9 +91,9 @@ int mknod(const char *path, int major, int minor);
 /*
  * Environment variables
  *
- * All environment state lives in the kernel. Variables are "KEY=value"
- * strings. Maximum 16 variables, 64 chars each.
- * Environment survives across program restarts.
+ * Each process has its own environment, inherited from its parent on
+ * spawn(). Variables are "KEY=value" strings. Maximum 16 variables,
+ * 64 chars each. Changes in a child do not affect the parent.
  */
 
 /* Set a variable. Returns 0 on success, -1 if full. */

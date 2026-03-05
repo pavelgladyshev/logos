@@ -9,7 +9,7 @@ int main(int argc, char *argv[])
 {
     int i;
 
-    puts("Hello from user program!\n");
+    puts("Hello from user program!");
     printf("main() is at address 0x%x\n", (unsigned int)main);
     printf("argc = %d\n", argc);
 
@@ -17,6 +17,6 @@ int main(int argc, char *argv[])
         printf("argv[%d] = \"%s\"\n", i, argv[i]);
     }
 
-    puts("Calling exit syscall...\n");
+    puts("Calling exit syscall...");
     return 42;
 }

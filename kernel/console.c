@@ -19,6 +19,7 @@ void puts(const char *s) {
     while (*s) {
         putchar(*s++);
     }
+    putchar('\n');
 }
 
 void put_uint(uint32_t n) {

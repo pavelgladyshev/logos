@@ -29,7 +29,7 @@ int dir_lookup(uint32_t dir_ino, const char *name, uint32_t *found_ino) {
         }
 
         struct dirent *de = (struct dirent *)block_buf;
-        for (int i = 0; i < DIRENTS_PER_BLOCK && entry_idx < entries; i++, entry_idx++) {
+        for (int i = 0; i < (int)DIRENTS_PER_BLOCK && entry_idx < entries; i++, entry_idx++) {
             if (de[i].inode != DIRENT_FREE && strcmp(de[i].name, name) == 0) {
                 *found_ino = de[i].inode;
                 return FS_OK;
@@ -71,7 +71,7 @@ int dir_add(uint32_t dir_ino, const char *name, uint32_t ino) {
         }
 
         struct dirent *de = (struct dirent *)block_buf;
-        for (int i = 0; i < DIRENTS_PER_BLOCK; i++) {
+        for (int i = 0; i < (int)DIRENTS_PER_BLOCK; i++) {
             if (de[i].inode == DIRENT_FREE) {
                 /* Found free slot */
                 de[i].inode = ino;
@@ -98,7 +98,7 @@ int dir_add(uint32_t dir_ino, const char *name, uint32_t ino) {
             {
                 struct dirent *de = (struct dirent *)block_buf;
                 int j;
-                for (j = 0; j < DIRENTS_PER_BLOCK; j++) {
+                for (j = 0; j < (int)DIRENTS_PER_BLOCK; j++) {
                     de[j].inode = DIRENT_FREE;
                     de[j].name[0] = '\0';
                 }
@@ -139,7 +139,7 @@ int dir_remove(uint32_t dir_ino, const char *name) {
         }
 
         struct dirent *de = (struct dirent *)block_buf;
-        for (int i = 0; i < DIRENTS_PER_BLOCK; i++) {
+        for (int i = 0; i < (int)DIRENTS_PER_BLOCK; i++) {
             if (de[i].inode != DIRENT_FREE && strcmp(de[i].name, name) == 0) {
                 /* Found it - clear the entry */
                 de[i].inode = DIRENT_FREE;
@@ -209,7 +209,7 @@ static int dir_is_empty(uint32_t dir_ino) {
         }
 
         struct dirent *de = (struct dirent *)block_buf;
-        for (int i = 0; i < DIRENTS_PER_BLOCK; i++) {
+        for (int i = 0; i < (int)DIRENTS_PER_BLOCK; i++) {
             if (de[i].inode != DIRENT_FREE &&
                 strcmp(de[i].name, ".") != 0 &&
                 strcmp(de[i].name, "..") != 0) {

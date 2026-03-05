@@ -4,7 +4,7 @@
  *
  * Built-in commands: help, exit, echo, set, unset
  * Supports environment variables with $VAR expansion and PATH-based lookup.
- * Environment is kernel-managed; external programs inherit it automatically.
+ * Each spawned program inherits a copy of the shell's environment.
  */
 
 #include "libc.h"
@@ -105,17 +105,17 @@ static int parse_cmd(char *line, char *argv[], int max_args)
  */
 static void cmd_help(void)
 {
-    puts("RISC-V Shell - Built-in commands:\n");
-    puts("  help             - Show this help message\n");
-    puts("  exit [code]      - Exit shell with optional exit code\n");
-    puts("  echo [args..]    - Print arguments (supports $VAR expansion)\n");
-    puts("  set              - List all environment variables\n");
-    puts("  set VAR=value    - Set environment variable\n");
-    puts("  unset VAR        - Remove environment variable\n");
-    puts("  cd [dir]         - Change current directory\n");
-    puts("\n");
-    puts("Variables: $VAR or ${VAR} are expanded in all arguments.\n");
-    puts("PATH is used to locate commands (default: /bin).\n");
+    puts("RISC-V Shell - Built-in commands:");
+    puts("  help             - Show this help message");
+    puts("  exit [code]      - Exit shell with optional exit code");
+    puts("  echo [args..]    - Print arguments (supports $VAR expansion)");
+    puts("  set              - List all environment variables");
+    puts("  set VAR=value    - Set environment variable");
+    puts("  unset VAR        - Remove environment variable");
+    puts("  cd [dir]         - Change current directory");
+    puts("");
+    puts("Variables: $VAR or ${VAR} are expanded in all arguments.");
+    puts("PATH is used to locate commands (default: /bin).");
 }
 
 /*
@@ -191,9 +191,10 @@ static void cmd_cd(int argc, char *argv[])
 }
 
 /*
- * Try to execute an external program.
+ * Try to spawn an external program.
  * Searches PATH directories for the command if it doesn't contain '/'.
- * Environment is kernel-managed; child programs inherit it automatically.
+ * spawn() returns the child's exit code on success (>= 0),
+ * or a negative error code if loading failed.
  */
 static void run_external(int argc, char *argv[])
 {
@@ -204,8 +205,11 @@ static void run_external(int argc, char *argv[])
         /* Path contains '/' — use as-is */
         strncpy(path, argv[0], sizeof(path) - 1);
         path[sizeof(path) - 1] = '\0';
-        result = exec(path, argv);
-        printf("sh: %s: not found (error %d)\n", argv[0], result);
+        result = spawn(path, argv);
+        if (result < 0) {
+            printf("sh: %s: not found (error %d)\n", argv[0], result);
+        }
+        /* result >= 0: child ran and exited, exit code already in $? */
         return;
     }
 
@@ -229,8 +233,12 @@ static void run_external(int argc, char *argv[])
             strncpy(path + dlen + 1, argv[0], sizeof(path) - dlen - 2);
             path[sizeof(path) - 1] = '\0';
 
-            result = exec(path, argv);
-            /* If exec returns, it failed — try next PATH entry */
+            result = spawn(path, argv);
+            if (result >= 0) {
+                /* Child ran and exited — exit code already in $? */
+                return;
+            }
+            /* spawn failed (negative) — try next PATH entry */
         }
 
         /* Advance past this entry */
@@ -255,8 +263,8 @@ int main(int argc, char *argv[])
 
     for (;;) {
         char *cwd = getenv("CWD");
-        if (cwd) puts(cwd);
-        puts("$ ");
+        if (cwd) write(STDOUT_FILENO, cwd, strlen(cwd));
+        write(STDOUT_FILENO, "$ ", 2);
         gets(line, MAX_CMD_LEN);
 
         /* Skip empty lines */

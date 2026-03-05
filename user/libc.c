@@ -15,12 +15,12 @@ typedef __builtin_va_list va_list;
 #define va_end(ap)          __builtin_va_end(ap)
 
 /*
- * exec() convenience wrapper — calls execve() with NULL envp,
- * which preserves the current kernel environment unchanged.
+ * spawn() convenience wrapper — calls spawnve() with NULL envp,
+ * which inherits the parent's environment unchanged.
  */
-int exec(const char *path, char *const argv[])
+int spawn(const char *path, char *const argv[])
 {
-    return execve(path, argv, (char *const *)0);
+    return spawnve(path, argv, (char *const *)0);
 }
 
 /*
@@ -39,10 +39,12 @@ int putchar(int c)
 int puts(const char *s)
 {
     size_t len = strlen(s);
-    if (write(STDOUT_FILENO, s, len) == (ssize_t)len) {
-        return 0;
+    if (write(STDOUT_FILENO, s, len) != (ssize_t)len) {
+        return -1;
     }
-    return -1;
+    char nl = '\n';
+    write(STDOUT_FILENO, &nl, 1);
+    return 0;
 }
 
 int getchar(void)
@@ -71,7 +73,7 @@ char *gets(char *buf, int size)
         if (c == 127 || c == 8) {  /* Backspace or DEL */
             if (i > 0) {
                 i--;
-                puts("\b \b");  /* Erase character on screen */
+                write(STDOUT_FILENO, "\b \b", 3);  /* Erase character on screen */
             }
             continue;
         }

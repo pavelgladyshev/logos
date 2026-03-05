@@ -66,12 +66,13 @@ boot-rom.txt: boot-rom
 KERNEL_OBJS = kernel/crt0.o kernel/string.o kernel/console.o kernel/block.o \
               kernel/inode.o kernel/dir.o kernel/file.o kernel/fs.o \
               kernel/device.o kernel/console_dev.o kernel/loader.o \
-              kernel/loader_asm.o kernel/trap.o kernel/syscall.o kernel/main.o
+              kernel/loader_asm.o kernel/trap.o kernel/process.o \
+              kernel/syscall.o kernel/main.o
 
 KERNEL_HEADERS = kernel/fs.h kernel/types.h kernel/fs_types.h kernel/string.h \
                  kernel/console.h kernel/block.h kernel/inode.h kernel/dir.h \
                  kernel/file.h kernel/device.h kernel/console_dev.h kernel/elf.h \
-                 kernel/loader.h kernel/trap.h kernel/syscall.h
+                 kernel/loader.h kernel/trap.h kernel/syscall.h kernel/process.h
 
 kernel/%.o: kernel/%.c $(KERNEL_HEADERS)
 	$(RISCV_TOOL_PREFIX)gcc $(RISCV_CFLAGS) -Ikernel -c $< -o $@
@@ -102,8 +103,8 @@ USER_COMMON_OBJS = user/user_crt0.user.o $(USER_LIB_OBJS)
 user/%.user.o: user/%.c user/libc.h
 	$(RISCV_TOOL_PREFIX)gcc $(USER_CFLAGS) -Iuser -c $< -o $@
 
-user/%.user.o: user/%.S
-	$(RISCV_TOOL_PREFIX)gcc $(USER_CFLAGS) -Iuser -c $< -o $@
+user/%.user.o: user/%.S kernel/syscall_nr.h
+	$(RISCV_TOOL_PREFIX)gcc $(USER_CFLAGS) -Iuser -Ikernel -c $< -o $@
 
 # Hello program
 HELLO_OBJS = $(USER_COMMON_OBJS) user/hello.user.o
@@ -114,14 +115,14 @@ hello.elf: $(HELLO_OBJS)
 	$(RISCV_TOOL_PREFIX)nm hello-debug.elf > hello.sym
 	$(RISCV_TOOL_PREFIX)strip -s hello-debug.elf -o hello.elf
 
-# Exec demo program
-EXEC_DEMO_OBJS = $(USER_COMMON_OBJS) user/exec_demo.user.o
+# Spawn demo program
+SPAWN_DEMO_OBJS = $(USER_COMMON_OBJS) user/spawn_demo.user.o
 
-exec_demo.elf: $(EXEC_DEMO_OBJS)
-	$(RISCV_TOOL_PREFIX)ld -nostdlib -o exec_demo-debug.elf -T $(USER_LINKER_SCRIPT) $(EXEC_DEMO_OBJS)
-	$(RISCV_TOOL_PREFIX)objdump -S exec_demo-debug.elf > exec_demo.asm
-	$(RISCV_TOOL_PREFIX)nm exec_demo-debug.elf > exec_demo.sym
-	$(RISCV_TOOL_PREFIX)strip -s exec_demo-debug.elf -o exec_demo.elf
+spawn_demo.elf: $(SPAWN_DEMO_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o spawn_demo-debug.elf -T $(USER_LINKER_SCRIPT) $(SPAWN_DEMO_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S spawn_demo-debug.elf > spawn_demo.asm
+	$(RISCV_TOOL_PREFIX)nm spawn_demo-debug.elf > spawn_demo.sym
+	$(RISCV_TOOL_PREFIX)strip -s spawn_demo-debug.elf -o spawn_demo.elf
 
 # Shell program
 SHELL_OBJS = $(USER_COMMON_OBJS) user/shell.user.o
@@ -168,22 +169,31 @@ mknod.elf: $(MKNOD_OBJS)
 	$(RISCV_TOOL_PREFIX)nm mknod-debug.elf > mknod.sym
 	$(RISCV_TOOL_PREFIX)strip -s mknod-debug.elf -o mknod.elf
 
-# Demo_env program
-DEMO_ENV_OBJS = $(USER_COMMON_OBJS) user/demo_env.user.o
+# Env demo program
+ENV_DEMO_OBJS = $(USER_COMMON_OBJS) user/env_demo.user.o
 
-demo_env.elf: $(DEMO_ENV_OBJS)
-	$(RISCV_TOOL_PREFIX)ld -nostdlib -o demo_env-debug.elf -T $(USER_LINKER_SCRIPT) $(DEMO_ENV_OBJS)
-	$(RISCV_TOOL_PREFIX)objdump -S demo_env-debug.elf > demo_env.asm
-	$(RISCV_TOOL_PREFIX)nm demo_env-debug.elf > demo_env.sym
-	$(RISCV_TOOL_PREFIX)strip -s demo_env-debug.elf -o demo_env.elf
+env_demo.elf: $(ENV_DEMO_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o env_demo-debug.elf -T $(USER_LINKER_SCRIPT) $(ENV_DEMO_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S env_demo-debug.elf > env_demo.asm
+	$(RISCV_TOOL_PREFIX)nm env_demo-debug.elf > env_demo.sym
+	$(RISCV_TOOL_PREFIX)strip -s env_demo-debug.elf -o env_demo.elf
 
-user-programs: hello.elf exec_demo.elf shell.elf ls.elf mkdir.elf rmdir.elf mknod.elf demo_env.elf
+# Cat program (test file reading)
+CAT_OBJS = $(USER_COMMON_OBJS) user/cat.user.o
+
+cat.elf: $(CAT_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o cat-debug.elf -T $(USER_LINKER_SCRIPT) $(CAT_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S cat-debug.elf > cat.asm
+	$(RISCV_TOOL_PREFIX)nm cat-debug.elf > cat.sym
+	$(RISCV_TOOL_PREFIX)strip -s cat-debug.elf -o cat.elf
+
+user-programs: hello.elf spawn_demo.elf shell.elf ls.elf mkdir.elf rmdir.elf mknod.elf env_demo.elf cat.elf
 
 # Check user programs for PIE compatibility
-check-pie: $(HELLO_OBJS) $(EXEC_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(DEMO_ENV_OBJS)
+check-pie: $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS)
 	@echo "=== Checking user program object files for PIE compatibility ==="
 	@FAILED=0; \
-	for obj in $(HELLO_OBJS) $(EXEC_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(DEMO_ENV_OBJS); do \
+	for obj in $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS); do \
 		if ! ./check_pie.sh $$obj > /dev/null 2>&1; then \
 			./check_pie.sh $$obj; \
 			FAILED=1; \
@@ -223,19 +233,22 @@ $(FSTOOL_BIN): $(FSTOOL_OBJS)
 # Filesystem image
 # ====================================
 
-fs-image: $(FSTOOL_BIN) kernel.bin hello.elf exec_demo.elf shell.elf ls.elf mkdir.elf rmdir.elf mknod.elf demo_env.elf
+fs-image: $(FSTOOL_BIN) kernel.bin hello.elf spawn_demo.elf shell.elf ls.elf mkdir.elf rmdir.elf mknod.elf env_demo.elf cat.elf
 	$(FSTOOL_BIN) format block_storage.bin 256
 	$(FSTOOL_BIN) mkdir block_storage.bin /boot
 	$(FSTOOL_BIN) mkdir block_storage.bin /bin
+	$(FSTOOL_BIN) mkdir block_storage.bin /etc
 	$(FSTOOL_BIN) add block_storage.bin /boot/kernel kernel.bin
 	$(FSTOOL_BIN) add block_storage.bin /bin/hello hello.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/exec_demo exec_demo.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/spawn_demo spawn_demo.elf
 	$(FSTOOL_BIN) add block_storage.bin /bin/sh shell.elf
 	$(FSTOOL_BIN) add block_storage.bin /bin/ls ls.elf
 	$(FSTOOL_BIN) add block_storage.bin /bin/mkdir mkdir.elf
 	$(FSTOOL_BIN) add block_storage.bin /bin/rmdir rmdir.elf
 	$(FSTOOL_BIN) add block_storage.bin /bin/mknod mknod.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/demo_env demo_env.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/env_demo env_demo.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/cat cat.elf
+	$(FSTOOL_BIN) add block_storage.bin /etc/hello.txt hello.txt
 	@echo "Filesystem image created."
 
 # ====================================
@@ -280,15 +293,16 @@ clean-kernel:
 	rm -f $(KERNEL_OBJS) kernel-debug.elf kernel.bin kernel.map kernel.sym kernel.asm
 
 clean-user:
-	rm -f $(HELLO_OBJS) $(EXEC_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(DEMO_ENV_OBJS)
+	rm -f $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS)
 	rm -f hello.elf hello-debug.elf hello.asm hello.sym
-	rm -f exec_demo.elf exec_demo-debug.elf exec_demo.asm exec_demo.sym
+	rm -f spawn_demo.elf spawn_demo-debug.elf spawn_demo.asm spawn_demo.sym
 	rm -f shell.elf shell-debug.elf shell.asm shell.sym
 	rm -f ls.elf ls-debug.elf ls.asm ls.sym
 	rm -f mkdir.elf mkdir-debug.elf mkdir.asm mkdir.sym
 	rm -f rmdir.elf rmdir-debug.elf rmdir.asm rmdir.sym
 	rm -f mknod.elf mknod-debug.elf mknod.asm mknod.sym
-	rm -f demo_env.elf demo_env-debug.elf demo_env.asm demo_env.sym
+	rm -f env_demo.elf env_demo-debug.elf env_demo.asm env_demo.sym
+	rm -f cat.elf cat-debug.elf cat.asm cat.sym
 
 clean-fstool:
 	rm -f $(FSTOOL_OBJS) $(FSTOOL_BIN)

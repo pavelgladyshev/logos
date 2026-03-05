@@ -1,11 +1,11 @@
 /*
- * demo_env - Demonstrate environment variable API
+ * env_demo - Demonstrate environment variable API
  * Licensed under Creative Commons Attribution International License 4.0
  *
  * Shows getenv(), setenv(), unsetenv(), and env listing.
  * Run from the shell to see environment propagation:
  *   $ set FOO=hello
- *   $ demo_env
+ *   $ env_demo
  */
 
 #include "libc.h"
@@ -15,16 +15,17 @@ int main(void)
     char *envp[17];
     int count, i;
 
-    puts("=== Environment Variable Demo ===\n\n");
+    puts("=== Environment Variable Demo ===");
+    puts("");
 
     /* Show inherited environment */
-    puts("Inherited environment:\n");
+    puts("Inherited environment:");
     count = env_to_envp(envp);
     for (i = 0; i < count; i++) {
         printf("  %s\n", envp[i]);
     }
     if (count == 0) {
-        puts("  (none)\n");
+        puts("  (none)");
     }
 
     /* Look up a specific variable */
@@ -32,24 +33,27 @@ int main(void)
     printf("\ngetenv(\"PATH\") = %s\n", path ? path : "(null)");
 
     /* Set a new variable */
-    puts("\nCalling setenv(\"GREETING\", \"hello world\")...\n");
+    printf("\n");
+    puts("Calling setenv(\"GREETING\", \"hello world\")...");
     setenv("GREETING", "hello world");
 
     char *greeting = getenv("GREETING");
     printf("getenv(\"GREETING\") = %s\n", greeting ? greeting : "(null)");
 
     /* List updated environment */
-    puts("\nUpdated environment:\n");
+    printf("\n");
+    puts("Updated environment:");
     count = env_to_envp(envp);
     for (i = 0; i < count; i++) {
         printf("  %s\n", envp[i]);
     }
 
     /* Remove the variable */
-    puts("\nCalling unsetenv(\"GREETING\")...\n");
+    printf("\n");
+    puts("Calling unsetenv(\"GREETING\")...");
     unsetenv("GREETING");
 
-    puts("Final environment:\n");
+    puts("Final environment:");
     count = env_to_envp(envp);
     for (i = 0; i < count; i++) {
         printf("  %s\n", envp[i]);

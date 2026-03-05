@@ -54,7 +54,7 @@ int elf_load(const char *path, struct program_info *info);
  *
  * Returns: LOAD_OK on success, negative error code on failure
  */
-int elf_load_at(const char *path, uint32_t load_addr, struct program_info *info);
+int elf_load_at(const char *path, uint32_t load_addr, uint32_t max_size, struct program_info *info);
 
 /*
  * Execute a loaded program.

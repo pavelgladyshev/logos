@@ -32,7 +32,7 @@ int main(int argc, char *argv[]) {
     int major, minor, result;
 
     if (argc < 4) {
-        puts("usage: mknod <path> <major> <minor>\n");
+        puts("usage: mknod <path> <major> <minor>");
         return 1;
     }
 
@@ -40,7 +40,7 @@ int main(int argc, char *argv[]) {
     minor = atoi(argv[3]);
 
     if (major < 0 || minor < 0) {
-        puts("mknod: major and minor must be non-negative integers\n");
+        puts("mknod: major and minor must be non-negative integers");
         return 1;
     }
 

@@ -3,6 +3,7 @@
  * Licensed under Creative Commons Attribution International License 4.0
  *
  * Handles system calls from user programs via ecall instruction.
+ * Uses per-process file descriptors from the process table.
  */
 
 #include "syscall.h"
@@ -14,75 +15,33 @@
 #include "console_dev.h"
 #include "loader.h"
 #include "string.h"
+#include "process.h"
 
 /* Console minor device number */
 #define CONSOLE_MINOR  0
 
-/* File descriptor table */
-static struct fd_entry fd_table[MAX_FD];
-
-/* Exit state */
-static int program_exited = 0;
-static int exit_code = 0;
-
 /*
- * Persistent kernel environment.
- * Survives across program restarts (not cleared by syscall_init).
- * Initialized once at boot by syscall_env_init().
+ * Get a file descriptor entry for the current process.
+ * Returns pointer to fd_entry, or NULL if fd is invalid.
  */
-static char kern_env[MAX_ENVC][MAX_ENV_LEN];
-static int kern_env_count = 0;
-
-/*
- * Initialize the syscall subsystem.
- * Pre-opens stdin (fd 0), stdout (fd 1), and stderr (fd 2) to console device.
- */
-void syscall_init(void) {
-    int i;
-
-    /* Clear all file descriptors */
-    for (i = 0; i < MAX_FD; i++) {
-        fd_table[i].in_use = 0;
-    }
-
-    /* fd 0 = stdin -> console device */
-    fd_table[0].in_use = 1;
-    fd_table[0].inode = 0;  /* No inode, direct device access */
-    fd_table[0].offset = 0;
-    fd_table[0].type = FT_CHARDEV;
-    fd_table[0].major = CONSOLE_MAJOR;
-    fd_table[0].minor = CONSOLE_MINOR;
-
-    /* fd 1 = stdout -> console device */
-    fd_table[1].in_use = 1;
-    fd_table[1].inode = 0;  /* No inode, direct device access */
-    fd_table[1].offset = 0;
-    fd_table[1].type = FT_CHARDEV;
-    fd_table[1].major = CONSOLE_MAJOR;
-    fd_table[1].minor = CONSOLE_MINOR;
-
-    /* fd 2 = stderr -> console device */
-    fd_table[2].in_use = 1;
-    fd_table[2].inode = 0;
-    fd_table[2].offset = 0;
-    fd_table[2].type = FT_CHARDEV;
-    fd_table[2].major = CONSOLE_MAJOR;
-    fd_table[2].minor = CONSOLE_MINOR;
-
-    /* Reset exit state */
-    program_exited = 0;
-    exit_code = 0;
+static struct fd_entry *get_fd(int fd) {
+    if (fd < 0 || fd >= MAX_FD)
+        return (struct fd_entry *)0;
+    if (!proc_table[current_proc].fds[fd].in_use)
+        return (struct fd_entry *)0;
+    return &proc_table[current_proc].fds[fd];
 }
 
 /*
- * Allocate a new file descriptor.
+ * Allocate a new file descriptor for the current process.
  * Returns fd number (>= 0) on success, -1 if no fd available.
  */
 static int fd_alloc(void) {
     int i;
+    struct fd_entry *fds = proc_table[current_proc].fds;
     for (i = 3; i < MAX_FD; i++) {  /* Start at 3 (skip stdin/stdout/stderr) */
-        if (!fd_table[i].in_use) {
-            fd_table[i].in_use = 1;
+        if (!fds[i].in_use) {
+            fds[i].in_use = 1;
             return i;
         }
     }
@@ -90,12 +49,45 @@ static int fd_alloc(void) {
 }
 
 /*
- * sys_exit - Terminate the program
+ * sys_exit - Terminate the current process
  * a0 = exit status
+ *
+ * If the process has a parent (was launched by spawn):
+ *   - Stores exit code, resumes parent with exit code as spawn return value
+ *   - Calls trap_ret() directly (never returns)
+ * If no parent (shell, launched by kernel):
+ *   - Stores exit code, returns 1 to signal kernel to handle it
  */
-static void sys_exit(trap_frame_t *tf) {
-    exit_code = (int)tf->a0;
-    program_exited = 1;
+static int sys_exit(trap_frame_t *tf) {
+    struct process *cur = &proc_table[current_proc];
+    int exit_status = (int)tf->a0;
+
+    cur->exit_code = exit_status;
+
+    if (cur->parent >= 0) {
+        /* Child process — return to parent */
+        int parent_slot = cur->parent;
+        struct process *parent = &proc_table[parent_slot];
+
+        /* Set parent's spawn() return value to child's exit code */
+        parent->tf.a0 = (uint32_t)exit_status;
+        /* Advance parent's mepc past the ecall instruction */
+        parent->tf.mepc += 4;
+
+        /* Update process states */
+        parent->state = PROC_RUNNING;
+        proc_free(current_proc);
+        current_proc = parent_slot;
+
+        /* Store exit code in parent's "?" env var */
+        proc_set_env_int(parent_slot, "?", exit_status);
+
+        /* Resume parent — never returns */
+        trap_ret(&parent->tf);
+    }
+
+    /* Top-level process (shell) — signal kernel */
+    return 1;
 }
 
 /*
@@ -110,12 +102,10 @@ static int32_t sys_read(trap_frame_t *tf) {
     struct fd_entry *fde;
     int result;
 
-    /* Validate fd */
-    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].in_use) {
+    fde = get_fd(fd);
+    if (fde == (struct fd_entry *)0) {
         return -1;  /* EBADF */
     }
-
-    fde = &fd_table[fd];
 
     if (fde->type == FT_CHARDEV) {
         /* Read from character device */
@@ -145,12 +135,10 @@ static int32_t sys_write(trap_frame_t *tf) {
     struct fd_entry *fde;
     int result;
 
-    /* Validate fd */
-    if (fd < 0 || fd >= MAX_FD || !fd_table[fd].in_use) {
+    fde = get_fd(fd);
+    if (fde == (struct fd_entry *)0) {
         return -1;  /* EBADF */
     }
-
-    fde = &fd_table[fd];
 
     if (fde->type == FT_CHARDEV) {
         /* Write to character device */
@@ -166,21 +154,6 @@ static int32_t sys_write(trap_frame_t *tf) {
     }
 
     return -1;  /* Unsupported file type */
-}
-
-/*
- * Find a variable in the kernel environment by name.
- * Returns index, or -1 if not found.
- */
-static int kern_env_find(const char *name) {
-    int nlen = strlen(name);
-    int i;
-    for (i = 0; i < kern_env_count; i++) {
-        if (strncmp(kern_env[i], name, nlen) == 0 && kern_env[i][nlen] == '=') {
-            return i;
-        }
-    }
-    return -1;
 }
 
 /*
@@ -245,11 +218,11 @@ static int resolve_path(const char *path, char *abs_path, int abs_size) {
         if (len >= abs_size) return -1;
         memcpy(abs_path, path, len + 1);
     } else {
-        /* Relative path — prepend CWD */
-        int cwd_idx = kern_env_find("CWD");
+        /* Relative path — prepend CWD from current process's environment */
+        int cwd_idx = proc_env_find(current_proc, "CWD");
         const char *cwd = "/";
         if (cwd_idx >= 0) {
-            char *eq = strchr(kern_env[cwd_idx], '=');
+            char *eq = strchr(proc_table[current_proc].env[cwd_idx], '=');
             if (eq != (char *)0) cwd = eq + 1;
         }
 
@@ -309,7 +282,7 @@ static int32_t sys_open(trap_frame_t *tf) {
         return -1;  /* EMFILE - too many open files */
     }
 
-    fde = &fd_table[fd];
+    fde = &proc_table[current_proc].fds[fd];
     fde->inode = ino;
     fde->offset = 0;
     fde->type = type;
@@ -334,33 +307,34 @@ static int32_t sys_close(trap_frame_t *tf) {
     int fd = (int)tf->a0;
 
     /* Validate fd (can't close stdin/stdout/stderr) */
-    if (fd < 3 || fd >= MAX_FD || !fd_table[fd].in_use) {
+    if (fd < 3 || fd >= MAX_FD || !proc_table[current_proc].fds[fd].in_use) {
         return -1;  /* EBADF */
     }
 
-    fd_table[fd].in_use = 0;
+    proc_table[current_proc].fds[fd].in_use = 0;
     return 0;
 }
 
 /*
- * Temporary buffers for exec arguments.
- * Must copy BEFORE loading new program, since load overwrites
- * the old program's memory where the strings live.
+ * Temporary buffers for spawn arguments.
+ * Must copy BEFORE loading new program, since the caller's
+ * memory contains the string pointers/data.
  */
-static char exec_path_buf[MAX_ARG_LEN];
-static char exec_argv_buf[MAX_ARGC][MAX_ARG_LEN];
-static int exec_argc;
+static char spawn_path_buf[MAX_ARG_LEN];
+static char spawn_argv_buf[MAX_ARGC][MAX_ARG_LEN];
+static int spawn_argc;
 
 /*
- * sys_exec - Replace current program with a new one
+ * sys_spawn - Launch a child program in a new process slot
  * a0 = path to executable
  * a1 = argv (NULL-terminated array of string pointers)
  * a2 = envp (NULL-terminated array of "KEY=value" strings, or NULL)
  *
- * On success: does not return, starts new program
- * On failure: returns negative error code
+ * On success: switches to child process via trap_ret (never returns).
+ *             When child exits, parent resumes with child's exit code in a0.
+ * On failure: returns negative error code to caller.
  */
-static int32_t sys_exec(trap_frame_t *tf) {
+static int32_t sys_spawn(trap_frame_t *tf) {
     const char *path = (const char *)tf->a0;
     char **argv = (char **)tf->a1;
     char **envp = (char **)tf->a2;
@@ -369,111 +343,137 @@ static int32_t sys_exec(trap_frame_t *tf) {
     uint32_t sp;
     uint32_t *argv_ptrs;
     char *argv_strings;
+    int child_slot;
+    struct process *child;
     int i, len;
 
-    /* Copy path to kernel buffer BEFORE loading (old memory will be overwritten) */
+    /* Copy path to kernel buffer (caller's memory stays intact, but
+     * we need a kernel copy for resolve_path to work with) */
     len = strlen(path);
     if (len >= MAX_ARG_LEN) {
         len = MAX_ARG_LEN - 1;
     }
-    memcpy(exec_path_buf, path, len);
-    exec_path_buf[len] = '\0';
+    memcpy(spawn_path_buf, path, len);
+    spawn_path_buf[len] = '\0';
 
     /* Resolve relative path to absolute */
     {
         char resolved[MAX_ARG_LEN];
-        if (resolve_path(exec_path_buf, resolved, MAX_ARG_LEN) < 0) {
-            return -FS_ERR_INVALID;
+        if (resolve_path(spawn_path_buf, resolved, MAX_ARG_LEN) < 0) {
+            return FS_ERR_INVALID;
         }
-        memcpy(exec_path_buf, resolved, strlen(resolved) + 1);
+        memcpy(spawn_path_buf, resolved, strlen(resolved) + 1);
     }
 
-    /* Copy arguments to kernel buffer BEFORE loading */
-    exec_argc = 0;
+    /* Copy arguments to kernel buffer */
+    spawn_argc = 0;
     if (argv != (char **)0) {
-        while (argv[exec_argc] != (char *)0 && exec_argc < MAX_ARGC) {
-            len = strlen(argv[exec_argc]);
+        while (argv[spawn_argc] != (char *)0 && spawn_argc < MAX_ARGC) {
+            len = strlen(argv[spawn_argc]);
             if (len >= MAX_ARG_LEN) {
                 len = MAX_ARG_LEN - 1;
             }
-            memcpy(exec_argv_buf[exec_argc], argv[exec_argc], len);
-            exec_argv_buf[exec_argc][len] = '\0';
-            exec_argc++;
+            memcpy(spawn_argv_buf[spawn_argc], argv[spawn_argc], len);
+            spawn_argv_buf[spawn_argc][len] = '\0';
+            spawn_argc++;
         }
     }
 
-    /* Update persistent kernel environment from envp if provided */
+    /* Allocate a new process slot for the child */
+    child_slot = proc_alloc();
+    if (child_slot < 0) {
+        return -1;  /* No free process slot */
+    }
+    child = &proc_table[child_slot];
+
+    /* Inherit parent's environment, then override if envp provided */
+    proc_env_copy(child_slot, current_proc);
     if (envp != (char **)0) {
         int envc = 0;
+        child->env_count = 0;
         while (envp[envc] != (char *)0 && envc < MAX_ENVC) {
             len = strlen(envp[envc]);
             if (len >= MAX_ENV_LEN) {
                 len = MAX_ENV_LEN - 1;
             }
-            memcpy(kern_env[envc], envp[envc], len);
-            kern_env[envc][len] = '\0';
+            memcpy(child->env[envc], envp[envc], len);
+            child->env[envc][len] = '\0';
             envc++;
         }
-        kern_env_count = envc;
+        child->env_count = envc;
     }
 
-    /* Now load the new program - this overwrites old program's memory */
-    result = elf_load(exec_path_buf, &info);
+    /* Load the program into the child's memory slot */
+    result = elf_load_at(spawn_path_buf, child->mem_base, PROC_SLOT_SIZE, &info);
     if (result != LOAD_OK) {
+        proc_free(child_slot);
         return result;  /* Return error to caller */
     }
 
-    /* Set up the new stack with arguments from kernel buffers.
+    /* Set up the child's stack with arguments.
      *
      * Stack layout (high to low):
-     *   argv string data   (exec_argc * MAX_ARG_LEN bytes)
+     *   argv string data   (spawn_argc * MAX_ARG_LEN bytes)
      *   [16-byte align]
      *   argv[0..argc-1], NULL   (pointer array)
      *   [16-byte align]
      *   <- sp
      */
-    sp = PROGRAM_STACK_TOP;
+    sp = child->stack_top;
 
     /* Reserve space for argv strings at the top */
-    argv_strings = (char *)(sp - (exec_argc * MAX_ARG_LEN));
+    argv_strings = (char *)(sp - (spawn_argc * MAX_ARG_LEN));
     sp = (uint32_t)argv_strings;
 
     /* Copy argv strings from kernel buffer */
-    for (i = 0; i < exec_argc; i++) {
-        len = strlen(exec_argv_buf[i]);
-        memcpy(argv_strings + (i * MAX_ARG_LEN), exec_argv_buf[i], len + 1);
+    for (i = 0; i < spawn_argc; i++) {
+        len = strlen(spawn_argv_buf[i]);
+        memcpy(argv_strings + (i * MAX_ARG_LEN), spawn_argv_buf[i], len + 1);
     }
 
     /* Align sp to 16 bytes */
     sp = sp & ~0xF;
 
     /* Reserve space for argv pointer array (including NULL terminator) */
-    sp -= (exec_argc + 1) * sizeof(uint32_t);
+    sp -= (spawn_argc + 1) * sizeof(uint32_t);
     argv_ptrs = (uint32_t *)sp;
 
     /* Fill in argv pointers */
-    for (i = 0; i < exec_argc; i++) {
+    for (i = 0; i < spawn_argc; i++) {
         argv_ptrs[i] = (uint32_t)(argv_strings + (i * MAX_ARG_LEN));
     }
-    argv_ptrs[exec_argc] = 0;  /* NULL terminator */
+    argv_ptrs[spawn_argc] = 0;  /* NULL terminator */
 
     /* Align sp to 16 bytes again */
     sp = sp & ~0xF;
 
-    /* Reset file descriptors (keep stdin/stdout/stderr) */
-    for (i = 3; i < MAX_FD; i++) {
-        fd_table[i].in_use = 0;
-    }
+    /* Set up child's trap frame */
+    child->tf.c_trap_sp = proc_table[current_proc].tf.c_trap_sp;
+    child->tf.c_trap = proc_table[current_proc].tf.c_trap;
+    child->tf.mepc = info.entry_point;
+    child->tf.sp = sp;
+    child->tf.ra = 0;  /* No return address */
+    child->tf.a0 = (uint32_t)spawn_argc;
+    child->tf.a1 = (uint32_t)argv_ptrs;
 
-    /* Set up trap frame for new program */
-    tf->mepc = info.entry_point;
-    tf->sp = sp;
-    tf->ra = 0;  /* No return address */
-    tf->a0 = (uint32_t)exec_argc;
-    tf->a1 = (uint32_t)argv_ptrs;
+    /* Initialize child's file descriptors (stdin/stdout/stderr) */
+    proc_fd_init(child_slot);
 
-    /* Return 2 to indicate exec succeeded - don't advance mepc */
-    return 2;
+    /* Set up parent-child relationship */
+    child->parent = current_proc;
+    child->state = PROC_RUNNING;
+    proc_table[current_proc].state = PROC_READY;
+
+    /* Switch to child process */
+    current_proc = child_slot;
+
+    /* Start child — never returns.
+     * When child calls exit(), sys_exit will resume the parent
+     * with the child's exit code in a0 (spawn's return value). */
+    trap_ret(&child->tf);
+
+    /* Not reached */
+    return 0;
 }
 
 /*
@@ -540,7 +540,7 @@ static int32_t sys_readdir(trap_frame_t *tf) {
 
     /* Resolve relative path to absolute */
     if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
-        return -FS_ERR_INVALID;
+        return FS_ERR_INVALID;
     }
 
     /* Resolve path to inode */
@@ -571,7 +571,7 @@ static int32_t sys_mkdir(trap_frame_t *tf) {
 
     /* Resolve relative path to absolute */
     if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
-        return -FS_ERR_INVALID;
+        return FS_ERR_INVALID;
     }
 
     int result = resolve_parent(resolved, &parent_ino, &name);
@@ -595,7 +595,7 @@ static int32_t sys_rmdir(trap_frame_t *tf) {
 
     /* Resolve relative path to absolute */
     if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
-        return -FS_ERR_INVALID;
+        return FS_ERR_INVALID;
     }
 
     int result = resolve_parent(resolved, &parent_ino, &name);
@@ -621,7 +621,7 @@ static int32_t sys_mknod(trap_frame_t *tf) {
 
     /* Resolve relative path to absolute */
     if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
-        return -FS_ERR_INVALID;
+        return FS_ERR_INVALID;
     }
 
     int result = resolve_parent(resolved, &parent_ino, &name);
@@ -647,7 +647,7 @@ static int32_t sys_chdir(trap_frame_t *tf) {
 
     /* Resolve to absolute path */
     if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
-        return -FS_ERR_INVALID;
+        return FS_ERR_INVALID;
     }
 
     /* Check path exists */
@@ -662,67 +662,52 @@ static int32_t sys_chdir(trap_frame_t *tf) {
         return result;
     }
     if (type != FT_DIR) {
-        return -FS_ERR_NOT_DIR;
+        return FS_ERR_NOT_DIR;
     }
 
-    /* Update CWD in kernel environment */
-    int idx = kern_env_find("CWD");
-    int rlen = strlen(resolved);
-    if (idx >= 0) {
-        /* Update existing CWD entry */
-        char *slot = kern_env[idx];
-        memcpy(slot, "CWD=", 4);
-        memcpy(slot + 4, resolved, rlen);
-        slot[4 + rlen] = '\0';
-    } else {
-        /* Add new CWD entry */
-        if (kern_env_count >= MAX_ENVC) return -1;
-        idx = kern_env_count++;
-        char *slot = kern_env[idx];
-        memcpy(slot, "CWD=", 4);
-        memcpy(slot + 4, resolved, rlen);
-        slot[4 + rlen] = '\0';
-    }
+    /* Update CWD in current process's environment */
+    proc_set_env(current_proc, "CWD", resolved);
 
     return 0;
 }
 
 /*
- * sys_setenv - Set a kernel environment variable
+ * sys_setenv - Set an environment variable in the current process
  * a0 = name, a1 = value
  * Returns: 0 on success, -1 on error
  */
 static int32_t sys_setenv(trap_frame_t *tf) {
     const char *name = (const char *)tf->a0;
     const char *value = (const char *)tf->a1;
+    struct process *p = &proc_table[current_proc];
     int nlen = strlen(name);
     int vlen = strlen(value);
     int idx;
-    char *slot;
+    char *s;
 
     if (nlen + 1 + vlen >= MAX_ENV_LEN) {
         vlen = MAX_ENV_LEN - nlen - 2;
         if (vlen < 0) return -1;
     }
 
-    idx = kern_env_find(name);
+    idx = proc_env_find(current_proc, name);
     if (idx < 0) {
         /* New entry */
-        if (kern_env_count >= MAX_ENVC) return -1;
-        idx = kern_env_count++;
+        if (p->env_count >= MAX_ENVC) return -1;
+        idx = p->env_count++;
     }
 
     /* Build "NAME=value" */
-    slot = kern_env[idx];
-    memcpy(slot, name, nlen);
-    slot[nlen] = '=';
-    memcpy(slot + nlen + 1, value, vlen);
-    slot[nlen + 1 + vlen] = '\0';
+    s = p->env[idx];
+    memcpy(s, name, nlen);
+    s[nlen] = '=';
+    memcpy(s + nlen + 1, value, vlen);
+    s[nlen + 1 + vlen] = '\0';
     return 0;
 }
 
 /*
- * sys_getenv - Get a kernel environment variable
+ * sys_getenv - Get an environment variable from the current process
  * a0 = name, a1 = buf, a2 = buflen
  * Copies the value (not "KEY=value", just the value) into buf.
  * Returns: length of value on success, -1 if not found
@@ -731,15 +716,16 @@ static int32_t sys_getenv(trap_frame_t *tf) {
     const char *name = (const char *)tf->a0;
     char *buf = (char *)tf->a1;
     uint32_t buflen = tf->a2;
+    struct process *p = &proc_table[current_proc];
     int idx;
     char *eq;
     char *value;
     int vlen;
 
-    idx = kern_env_find(name);
+    idx = proc_env_find(current_proc, name);
     if (idx < 0) return -1;
 
-    eq = strchr(kern_env[idx], '=');
+    eq = strchr(p->env[idx], '=');
     if (eq == (char *)0) return -1;
     value = eq + 1;
     vlen = strlen(value);
@@ -755,29 +741,30 @@ static int32_t sys_getenv(trap_frame_t *tf) {
 }
 
 /*
- * sys_unsetenv - Remove a kernel environment variable
+ * sys_unsetenv - Remove an environment variable from the current process
  * a0 = name
  * Returns: 0 on success, -1 if not found
  */
 static int32_t sys_unsetenv(trap_frame_t *tf) {
     const char *name = (const char *)tf->a0;
-    int idx = kern_env_find(name);
+    struct process *p = &proc_table[current_proc];
+    int idx = proc_env_find(current_proc, name);
     if (idx < 0) return -1;
 
     /* Compact: move last entry into this slot */
-    kern_env_count--;
-    if (idx < kern_env_count) {
-        strcpy(kern_env[idx], kern_env[kern_env_count]);
+    p->env_count--;
+    if (idx < p->env_count) {
+        strcpy(p->env[idx], p->env[p->env_count]);
     }
     return 0;
 }
 
 /*
- * sys_getenv_count - Return number of kernel environment variables
+ * sys_getenv_count - Return number of environment variables in the current process
  * Returns: count >= 0
  */
 static int32_t sys_getenv_count(void) {
-    return kern_env_count;
+    return proc_table[current_proc].env_count;
 }
 
 /*
@@ -789,35 +776,27 @@ static int32_t sys_getenv_entry(trap_frame_t *tf) {
     int index = (int)tf->a0;
     char *buf = (char *)tf->a1;
     uint32_t buflen = tf->a2;
+    struct process *p = &proc_table[current_proc];
     int len;
 
-    if (index < 0 || index >= kern_env_count) return -1;
+    if (index < 0 || index >= p->env_count) return -1;
 
-    len = strlen(kern_env[index]);
+    len = strlen(p->env[index]);
     if (buf != (char *)0 && buflen > 0) {
         int copy = len;
         if (copy >= (int)buflen) copy = (int)buflen - 1;
-        memcpy(buf, kern_env[index], copy);
+        memcpy(buf, p->env[index], copy);
         buf[copy] = '\0';
     }
     return len;
 }
 
 /*
- * Initialize kernel environment with defaults. Called once at boot.
- */
-void syscall_env_init(void) {
-    kern_env_count = 0;
-    /* Set default PATH, CWD, and exit status */
-    strcpy(kern_env[0], "PATH=/bin");
-    strcpy(kern_env[1], "CWD=/");
-    strcpy(kern_env[2], "?=0");
-    kern_env_count = 3;
-}
-
-/*
  * Dispatch a system call.
- * Returns 1 if program should exit, 0 otherwise.
+ * Returns 1 if the top-level program should exit (shell with no parent),
+ * 0 otherwise.
+ *
+ * Note: sys_spawn and sys_exit may call trap_ret() directly and never return.
  */
 int syscall_dispatch(trap_frame_t *tf) {
     uint32_t syscall_num = tf->a7;
@@ -825,8 +804,12 @@ int syscall_dispatch(trap_frame_t *tf) {
 
     switch (syscall_num) {
         case SYS_exit:
-            sys_exit(tf);
-            return 1;  /* Signal to exit */
+            if (sys_exit(tf)) {
+                /* Top-level process exit — signal kernel */
+                return 1;
+            }
+            /* sys_exit for a child calls trap_ret() and never reaches here */
+            return 0;
 
         case SYS_read:
             result = sys_read(tf);
@@ -844,14 +827,9 @@ int syscall_dispatch(trap_frame_t *tf) {
             result = sys_close(tf);
             break;
 
-        case SYS_exec:
-            result = sys_exec(tf);
-            if (result == 2) {
-                /* exec succeeded - don't modify a0 or mepc,
-                 * trap_ret will start the new program */
-                return 0;
-            }
-            /* exec failed - return error to caller */
+        case SYS_spawn:
+            result = sys_spawn(tf);
+            /* If we get here, spawn failed — return error to caller */
             break;
 
         case SYS_readdir:
@@ -907,36 +885,4 @@ int syscall_dispatch(trap_frame_t *tf) {
     tf->mepc += 4;
 
     return 0;  /* Continue execution */
-}
-
-/*
- * Get the exit code from sys_exit.
- */
-int syscall_get_exit_code(void) {
-    return exit_code;
-}
-
-/*
- * Set a kernel environment variable from within the kernel.
- * Used by main.c to store exit code in "?" before reloading shell.
- */
-void syscall_set_env(const char *name, const char *value) {
-    int nlen = strlen(name);
-    int vlen = strlen(value);
-    int idx;
-    char *slot;
-
-    if (nlen + 1 + vlen >= MAX_ENV_LEN) return;
-
-    idx = kern_env_find(name);
-    if (idx < 0) {
-        if (kern_env_count >= MAX_ENVC) return;
-        idx = kern_env_count++;
-    }
-
-    slot = kern_env[idx];
-    memcpy(slot, name, nlen);
-    slot[nlen] = '=';
-    memcpy(slot + nlen + 1, value, vlen);
-    slot[nlen + 1 + vlen] = '\0';
 }

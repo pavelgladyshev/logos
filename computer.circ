@@ -41,6 +41,9 @@
     <tool name="Pin">
       <a name="appearance" val="classic"/>
     </tool>
+    <tool name="Clock">
+      <a name="facing" val="north"/>
+    </tool>
   </lib>
   <lib desc="#Gates" name="1"/>
   <lib desc="#Plexers" name="2"/>
@@ -365,24 +368,28 @@
     <comp lib="0" loc="(760,1280)" name="Clock">
       <a name="appearance" val="NewPins"/>
     </comp>
-    <comp lib="0" loc="(800,510)" name="Tunnel">
+    <comp lib="0" loc="(810,450)" name="Tunnel">
       <a name="facing" val="east"/>
       <a name="label" val="Address"/>
       <a name="width" val="32"/>
     </comp>
-    <comp lib="0" loc="(800,540)" name="Tunnel">
+    <comp lib="0" loc="(810,480)" name="Tunnel">
       <a name="facing" val="east"/>
       <a name="label" val="MemRead"/>
     </comp>
-    <comp lib="0" loc="(800,570)" name="Tunnel">
+    <comp lib="0" loc="(810,510)" name="Tunnel">
       <a name="facing" val="east"/>
       <a name="label" val="MemWrite"/>
     </comp>
-    <comp lib="0" loc="(930,520)" name="Tunnel">
+    <comp lib="0" loc="(880,560)" name="Clock">
+      <a name="appearance" val="NewPins"/>
+      <a name="facing" val="north"/>
+    </comp>
+    <comp lib="0" loc="(940,460)" name="Tunnel">
       <a name="label" val="Data"/>
       <a name="width" val="32"/>
     </comp>
-    <comp lib="0" loc="(930,560)" name="Tunnel">
+    <comp lib="0" loc="(940,500)" name="Tunnel">
       <a name="label" val="TimerIntReq"/>
     </comp>
     <comp lib="0" loc="(990,1170)" name="Tunnel">
@@ -435,7 +442,7 @@
       <a name="hexRegisters" val="true"/>
     </comp>
     <comp lib="11" loc="(830,1080)" name="Block Storage"/>
-    <comp lib="11" loc="(860,540)" name="Timer"/>
+    <comp lib="11" loc="(870,480)" name="Timer"/>
     <comp lib="3" loc="(170,200)" name="Comparator">
       <a name="width" val="32"/>
     </comp>
@@ -739,17 +746,18 @@ a6369 544f4f42 6946203a 7973656c 6d657473 756f6620 a646e 6f6f622f
     <wire from="(740,920)" to="(740,930)"/>
     <wire from="(740,920)" to="(750,920)"/>
     <wire from="(760,1280)" to="(780,1280)"/>
-    <wire from="(800,510)" to="(810,510)"/>
-    <wire from="(800,540)" to="(820,540)"/>
-    <wire from="(800,570)" to="(810,570)"/>
-    <wire from="(810,510)" to="(810,530)"/>
-    <wire from="(810,530)" to="(820,530)"/>
-    <wire from="(810,550)" to="(810,570)"/>
-    <wire from="(810,550)" to="(820,550)"/>
-    <wire from="(910,540)" to="(920,540)"/>
-    <wire from="(910,560)" to="(930,560)"/>
-    <wire from="(920,520)" to="(920,540)"/>
-    <wire from="(920,520)" to="(930,520)"/>
+    <wire from="(810,450)" to="(820,450)"/>
+    <wire from="(810,480)" to="(830,480)"/>
+    <wire from="(810,510)" to="(820,510)"/>
+    <wire from="(820,450)" to="(820,470)"/>
+    <wire from="(820,470)" to="(830,470)"/>
+    <wire from="(820,490)" to="(820,510)"/>
+    <wire from="(820,490)" to="(830,490)"/>
+    <wire from="(880,530)" to="(880,560)"/>
+    <wire from="(920,480)" to="(930,480)"/>
+    <wire from="(920,500)" to="(940,500)"/>
+    <wire from="(930,460)" to="(930,480)"/>
+    <wire from="(930,460)" to="(940,460)"/>
     <wire from="(960,1080)" to="(1050,1080)"/>
     <wire from="(960,1180)" to="(980,1180)"/>
     <wire from="(960,1200)" to="(990,1200)"/>
