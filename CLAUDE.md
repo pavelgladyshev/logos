@@ -32,7 +32,7 @@ make check-pie            # Check user programs for PIE compatibility issues
 
 ```bash
 # Logisim (requires Java and Logisim Evolution)
-java -jar ~/logisim-evolution-ucd-4.0.2rc01-all.jar computer.circ -t tty
+java -jar ~/logisim-evolution-ucd-4.0.6-all.jar computer.circ -t tty
 
 # QEMU (alternative - compiles for RV64)
 make qemu                 # Run in QEMU with serial console
@@ -200,10 +200,10 @@ Each program runs in its own fixed 64KB memory slot with a per-process trap fram
 User programs use the user-space library (`user/libc.h`) which provides syscall wrappers:
 
 ```c
-#include "user/libc.h"
+#include "libc.h"
 
 int main(void) {
-    puts("Hello from user program!\n");
+    puts("Hello from user program!");  /* puts() appends newline (standard C) */
     printf("main() is at address 0x%x\n", (unsigned int)main);
     return 42;  // Exit code returned via sys_exit
 }
