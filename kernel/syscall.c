@@ -16,9 +16,20 @@
 #include "loader.h"
 #include "string.h"
 #include "process.h"
+#include "pipe.h"
 
 /* Console minor device number */
 #define CONSOLE_MINOR  0
+
+/* Open flags (must match user/libc.h) */
+#define OPEN_WRONLY  1
+#define OPEN_RDWR    2
+#define OPEN_CREAT   0x100
+#define OPEN_TRUNC   0x200
+#define OPEN_APPEND  0x400
+
+/* Forward declaration — defined later in this file */
+static int resolve_parent(const char *path, uint32_t *parent_ino, const char **name);
 
 /*
  * Get a file descriptor entry for the current process.
@@ -52,38 +63,55 @@ static int fd_alloc(void) {
  * sys_exit - Terminate the current process
  * a0 = exit status
  *
- * If the process has a parent (was launched by spawn):
- *   - Stores exit code, resumes parent with exit code as spawn return value
- *   - Calls trap_ret() directly (never returns)
- * If no parent (shell, launched by kernel):
- *   - Stores exit code, returns 1 to signal kernel to handle it
+ * Handles orphan cleanup, wakes sleeping parent (if applicable),
+ * or zombifies if parent is alive but not waiting.
+ * If no parent (shell, launched by kernel): returns 1 to signal kernel.
  */
 static int sys_exit(trap_frame_t *tf) {
     struct process *cur = &proc_table[current_proc];
     int exit_status = (int)tf->a0;
+    int i;
 
     cur->exit_code = exit_status;
 
+    /* Orphan cleanup: reparent or free children of the exiting process */
+    for (i = 0; i < MAX_PROCS; i++) {
+        if (proc_table[i].parent == current_proc) {
+            if (proc_table[i].state == PROC_ZOMBIE) {
+                proc_free(i);
+            } else {
+                proc_table[i].parent = -1;  /* orphan */
+            }
+        }
+    }
+
     if (cur->parent >= 0) {
-        /* Child process — return to parent */
         int parent_slot = cur->parent;
         struct process *parent = &proc_table[parent_slot];
 
-        /* Set parent's spawn() return value to child's exit code */
-        parent->tf.a0 = (uint32_t)exit_status;
-        /* Advance parent's mepc past the ecall instruction */
-        parent->tf.mepc += 4;
+        if (parent->state == PROC_SLEEPING) {
+            /* Check if parent is waiting for us specifically (spawn) or any child (wait) */
+            if ((parent->sleep_reason == SLEEP_CHILD && parent->sleep_chan == current_proc) ||
+                parent->sleep_reason == SLEEP_WAIT) {
+                /* Wake parent with exit code as return value */
+                parent->tf.a0 = (uint32_t)exit_status;
+                parent->tf.mepc += 4;
+                parent->state = PROC_READY;
+                parent->sleep_reason = SLEEP_NONE;
+                parent->sleep_chan = -1;
 
-        /* Update process states */
-        parent->state = PROC_RUNNING;
-        proc_free(current_proc);
-        current_proc = parent_slot;
+                /* Store exit code in parent's "?" env var */
+                proc_set_env_int(parent_slot, "?", exit_status);
 
-        /* Store exit code in parent's "?" env var */
-        proc_set_env_int(parent_slot, "?", exit_status);
+                /* Free child and reschedule */
+                proc_free(current_proc);
+                schedule();  /* never returns */
+            }
+        }
 
-        /* Resume parent — never returns */
-        trap_ret(&parent->tf);
+        /* Parent exists but is not waiting for us — become zombie */
+        cur->state = PROC_ZOMBIE;
+        schedule();  /* never returns */
     }
 
     /* Top-level process (shell) — signal kernel */
@@ -118,6 +146,18 @@ static int32_t sys_read(trap_frame_t *tf) {
             fde->offset += result;
         }
         return result;
+    } else if (fde->type == FT_PIPE) {
+        /* Read from pipe */
+        int pipe_idx = (int)fde->inode;
+        result = pipe_read(pipe_idx, buf, len);
+        if (result == -2) {
+            /* Would block: sleep and retry (ecall will re-execute) */
+            proc_table[current_proc].state = PROC_SLEEPING;
+            proc_table[current_proc].sleep_reason = SLEEP_IO;
+            proc_table[current_proc].sleep_chan = pipe_idx;
+            schedule();  /* never returns; woken process re-executes ecall */
+        }
+        return result;
     }
 
     return -1;  /* Unsupported file type */
@@ -149,6 +189,18 @@ static int32_t sys_write(trap_frame_t *tf) {
         result = file_write(fde->inode, fde->offset, buf, len);
         if (result > 0) {
             fde->offset += result;
+        }
+        return result;
+    } else if (fde->type == FT_PIPE) {
+        /* Write to pipe */
+        int pipe_idx = (int)fde->inode;
+        result = pipe_write(pipe_idx, buf, len);
+        if (result == -2) {
+            /* Would block: sleep and retry (ecall will re-execute) */
+            proc_table[current_proc].state = PROC_SLEEPING;
+            proc_table[current_proc].sleep_reason = SLEEP_IO;
+            proc_table[current_proc].sleep_chan = pipe_idx;
+            schedule();  /* never returns; woken process re-executes ecall */
         }
         return result;
     }
@@ -247,11 +299,14 @@ static int resolve_path(const char *path, char *abs_path, int abs_size) {
 
 /*
  * sys_open - Open a file
- * a0 = path, a1 = flags (ignored for now, read-only)
+ * a0 = path, a1 = flags
+ * Flags: O_RDONLY(0), O_WRONLY(1), O_RDWR(2), O_CREAT(0x100),
+ *        O_TRUNC(0x200), O_APPEND(0x400)
  * Returns: file descriptor, or negative error
  */
 static int32_t sys_open(trap_frame_t *tf) {
     const char *path = (const char *)tf->a0;
+    uint32_t flags = tf->a1;
     char resolved[MAX_ARG_LEN];
     uint32_t ino;
     uint8_t type;
@@ -267,13 +322,33 @@ static int32_t sys_open(trap_frame_t *tf) {
     /* Look up the path */
     result = fs_open(resolved, &ino);
     if (result != FS_OK) {
-        return -1;  /* ENOENT or other error */
+        /* File not found — create if O_CREAT is set */
+        if (flags & OPEN_CREAT) {
+            uint32_t parent_ino;
+            const char *name;
+            result = resolve_parent(resolved, &parent_ino, &name);
+            if (result != FS_OK) {
+                return -1;
+            }
+            result = file_create(parent_ino, name);
+            if (result < 0) {
+                return -1;
+            }
+            ino = (uint32_t)result;
+        } else {
+            return -1;  /* ENOENT */
+        }
     }
 
     /* Get inode type */
     result = inode_get_type(ino, &type);
     if (result != FS_OK) {
         return -1;
+    }
+
+    /* Handle O_TRUNC: truncate existing regular file to zero length */
+    if ((flags & OPEN_TRUNC) && type == FT_FILE) {
+        file_truncate(ino, 0);
     }
 
     /* Allocate a file descriptor */
@@ -286,6 +361,14 @@ static int32_t sys_open(trap_frame_t *tf) {
     fde->inode = ino;
     fde->offset = 0;
     fde->type = type;
+
+    /* Handle O_APPEND: set offset to end of file */
+    if ((flags & OPEN_APPEND) && type == FT_FILE) {
+        uint32_t size;
+        if (inode_get_size(ino, &size) == FS_OK) {
+            fde->offset = size;
+        }
+    }
 
     /* For character devices, get major/minor from inode */
     if (type == FT_CHARDEV) {
@@ -305,13 +388,23 @@ static int32_t sys_open(trap_frame_t *tf) {
  */
 static int32_t sys_close(trap_frame_t *tf) {
     int fd = (int)tf->a0;
+    struct fd_entry *fde;
 
-    /* Validate fd (can't close stdin/stdout/stderr) */
-    if (fd < 3 || fd >= MAX_FD || !proc_table[current_proc].fds[fd].in_use) {
+    if (fd < 0 || fd >= MAX_FD) {
         return -1;  /* EBADF */
     }
 
-    proc_table[current_proc].fds[fd].in_use = 0;
+    fde = &proc_table[current_proc].fds[fd];
+    if (!fde->in_use) {
+        return -1;  /* EBADF */
+    }
+
+    /* If this is a pipe fd, update refcounts */
+    if (fde->type == FT_PIPE) {
+        pipe_close_fd((int)fde->inode, (int)fde->minor);
+    }
+
+    fde->in_use = 0;
     return 0;
 }
 
@@ -325,12 +418,57 @@ static char spawn_argv_buf[MAX_ARGC][MAX_ARG_LEN];
 static int spawn_argc;
 
 /*
+ * setup_user_stack - Set up a process stack with argc/argv.
+ * Copies spawn_argv_buf[0..spawn_argc-1] strings to the stack area,
+ * builds pointer array.
+ *
+ * stack_top: top of the process's stack
+ * out_sp: receives the new stack pointer value
+ * out_argv: receives the address of the argv pointer array
+ */
+static void setup_user_stack(uint32_t stack_top, uint32_t *out_sp, uint32_t *out_argv) {
+    uint32_t sp = stack_top;
+    uint32_t *argv_ptrs;
+    char *argv_strings;
+    int i, len;
+
+    /* Reserve space for argv strings at the top */
+    argv_strings = (char *)(sp - (spawn_argc * MAX_ARG_LEN));
+    sp = (uint32_t)argv_strings;
+
+    /* Copy argv strings from kernel buffer */
+    for (i = 0; i < spawn_argc; i++) {
+        len = strlen(spawn_argv_buf[i]);
+        memcpy(argv_strings + (i * MAX_ARG_LEN), spawn_argv_buf[i], len + 1);
+    }
+
+    /* Align sp to 16 bytes */
+    sp = sp & ~0xF;
+
+    /* Reserve space for argv pointer array (including NULL terminator) */
+    sp -= (spawn_argc + 1) * sizeof(uint32_t);
+    argv_ptrs = (uint32_t *)sp;
+
+    /* Fill in argv pointers */
+    for (i = 0; i < spawn_argc; i++) {
+        argv_ptrs[i] = (uint32_t)(argv_strings + (i * MAX_ARG_LEN));
+    }
+    argv_ptrs[spawn_argc] = 0;  /* NULL terminator */
+
+    /* Align sp to 16 bytes again */
+    sp = sp & ~0xF;
+
+    *out_sp = sp;
+    *out_argv = (uint32_t)argv_ptrs;
+}
+
+/*
  * sys_spawn - Launch a child program in a new process slot
  * a0 = path to executable
  * a1 = argv (NULL-terminated array of string pointers)
  * a2 = envp (NULL-terminated array of "KEY=value" strings, or NULL)
  *
- * On success: switches to child process via trap_ret (never returns).
+ * On success: puts parent to sleep, child becomes READY, schedule() runs.
  *             When child exits, parent resumes with child's exit code in a0.
  * On failure: returns negative error code to caller.
  */
@@ -340,15 +478,12 @@ static int32_t sys_spawn(trap_frame_t *tf) {
     char **envp = (char **)tf->a2;
     struct program_info info;
     int result;
-    uint32_t sp;
-    uint32_t *argv_ptrs;
-    char *argv_strings;
+    uint32_t sp, argv_addr;
     int child_slot;
     struct process *child;
-    int i, len;
+    int len;
 
-    /* Copy path to kernel buffer (caller's memory stays intact, but
-     * we need a kernel copy for resolve_path to work with) */
+    /* Copy path to kernel buffer */
     len = strlen(path);
     if (len >= MAX_ARG_LEN) {
         len = MAX_ARG_LEN - 1;
@@ -410,42 +545,8 @@ static int32_t sys_spawn(trap_frame_t *tf) {
         return result;  /* Return error to caller */
     }
 
-    /* Set up the child's stack with arguments.
-     *
-     * Stack layout (high to low):
-     *   argv string data   (spawn_argc * MAX_ARG_LEN bytes)
-     *   [16-byte align]
-     *   argv[0..argc-1], NULL   (pointer array)
-     *   [16-byte align]
-     *   <- sp
-     */
-    sp = child->stack_top;
-
-    /* Reserve space for argv strings at the top */
-    argv_strings = (char *)(sp - (spawn_argc * MAX_ARG_LEN));
-    sp = (uint32_t)argv_strings;
-
-    /* Copy argv strings from kernel buffer */
-    for (i = 0; i < spawn_argc; i++) {
-        len = strlen(spawn_argv_buf[i]);
-        memcpy(argv_strings + (i * MAX_ARG_LEN), spawn_argv_buf[i], len + 1);
-    }
-
-    /* Align sp to 16 bytes */
-    sp = sp & ~0xF;
-
-    /* Reserve space for argv pointer array (including NULL terminator) */
-    sp -= (spawn_argc + 1) * sizeof(uint32_t);
-    argv_ptrs = (uint32_t *)sp;
-
-    /* Fill in argv pointers */
-    for (i = 0; i < spawn_argc; i++) {
-        argv_ptrs[i] = (uint32_t)(argv_strings + (i * MAX_ARG_LEN));
-    }
-    argv_ptrs[spawn_argc] = 0;  /* NULL terminator */
-
-    /* Align sp to 16 bytes again */
-    sp = sp & ~0xF;
+    /* Set up the child's stack with arguments */
+    setup_user_stack(child->stack_top, &sp, &argv_addr);
 
     /* Set up child's trap frame */
     child->tf.c_trap_sp = proc_table[current_proc].tf.c_trap_sp;
@@ -454,25 +555,375 @@ static int32_t sys_spawn(trap_frame_t *tf) {
     child->tf.sp = sp;
     child->tf.ra = 0;  /* No return address */
     child->tf.a0 = (uint32_t)spawn_argc;
-    child->tf.a1 = (uint32_t)argv_ptrs;
+    child->tf.a1 = argv_addr;
 
     /* Initialize child's file descriptors (stdin/stdout/stderr) */
     proc_fd_init(child_slot);
 
-    /* Set up parent-child relationship */
+    /* Set up parent-child relationship and sleep parent */
     child->parent = current_proc;
-    child->state = PROC_RUNNING;
-    proc_table[current_proc].state = PROC_READY;
+    child->state = PROC_READY;
+    proc_table[current_proc].state = PROC_SLEEPING;
+    proc_table[current_proc].sleep_reason = SLEEP_CHILD;
+    proc_table[current_proc].sleep_chan = child_slot;
 
-    /* Switch to child process */
-    current_proc = child_slot;
-
-    /* Start child — never returns.
-     * When child calls exit(), sys_exit will resume the parent
-     * with the child's exit code in a0 (spawn's return value). */
-    trap_ret(&child->tf);
+    /* Reschedule — scheduler will pick the child */
+    schedule();  /* never returns */
 
     /* Not reached */
+    return 0;
+}
+
+/*
+ * sys_fork - Create a copy of the current process
+ *
+ * Copies the full 32KB memory slot, trap frame, env, and fds.
+ * Adjusts child's registers (sp, mepc, ra, s0) by the memory delta.
+ *
+ * Returns: child PID to parent, 0 to child, -1 on error
+ */
+static int32_t sys_fork(trap_frame_t *tf) {
+    struct process *parent = &proc_table[current_proc];
+    int child_slot;
+    struct process *child;
+    int32_t delta;
+    uint32_t parent_base, parent_end;
+
+    child_slot = proc_alloc();
+    if (child_slot < 0) {
+        return -1;  /* No free slot */
+    }
+    child = &proc_table[child_slot];
+
+    /* Copy the entire 32KB memory slot */
+    memcpy((void *)child->mem_base, (void *)parent->mem_base, PROC_SLOT_SIZE);
+
+    /* Copy trap frame */
+    child->tf = parent->tf;
+
+    /* Compute address delta for register adjustment */
+    delta = (int32_t)(child->mem_base - parent->mem_base);
+    parent_base = parent->mem_base;
+    parent_end = parent_base + PROC_SLOT_SIZE;
+
+    /* Always adjust sp and mepc — they point into the process's slot */
+    child->tf.sp += delta;
+    child->tf.mepc += delta;
+
+    /* Adjust ra and s0 if they point within parent's slot */
+    if (child->tf.ra >= parent_base && child->tf.ra < parent_end) {
+        child->tf.ra += delta;
+    }
+    if (child->tf.s0 >= parent_base && child->tf.s0 < parent_end) {
+        child->tf.s0 += delta;
+    }
+
+    /* Advance child's mepc past the ecall instruction */
+    child->tf.mepc += 4;
+
+    /* Child's fork() returns 0 */
+    child->tf.a0 = 0;
+
+    /* Copy environment and file descriptors */
+    proc_env_copy(child_slot, current_proc);
+    memcpy(child->fds, parent->fds, sizeof(parent->fds));
+
+    /* Increment pipe refcounts for all pipe fds inherited by child */
+    {
+        int fd_i;
+        for (fd_i = 0; fd_i < MAX_FD; fd_i++) {
+            if (child->fds[fd_i].in_use && child->fds[fd_i].type == FT_PIPE) {
+                pipe_dup_fd((int)child->fds[fd_i].inode,
+                            (int)child->fds[fd_i].minor);
+            }
+        }
+    }
+
+    /* Set up parent-child relationship */
+    child->parent = current_proc;
+    child->state = PROC_READY;
+
+    /* Parent's fork() returns child's PID */
+    return child->pid;
+}
+
+/*
+ * sys_exec - Replace current process image with a new program
+ * a0 = path to executable
+ * a1 = argv (NULL-terminated array of string pointers)
+ * a2 = envp (NULL-terminated array of "KEY=value" strings, or NULL)
+ *
+ * On success: never returns (jumps to new program)
+ * On failure: returns -1
+ */
+static int32_t sys_exec(trap_frame_t *tf) {
+    const char *path = (const char *)tf->a0;
+    char **argv = (char **)tf->a1;
+    char **envp = (char **)tf->a2;
+    struct process *cur = &proc_table[current_proc];
+    struct program_info info;
+    int result;
+    uint32_t sp, argv_addr;
+    int len;
+
+    /* Copy path to kernel buffer BEFORE overwriting process memory */
+    len = strlen(path);
+    if (len >= MAX_ARG_LEN) {
+        len = MAX_ARG_LEN - 1;
+    }
+    memcpy(spawn_path_buf, path, len);
+    spawn_path_buf[len] = '\0';
+
+    /* Resolve relative path to absolute */
+    {
+        char resolved[MAX_ARG_LEN];
+        if (resolve_path(spawn_path_buf, resolved, MAX_ARG_LEN) < 0) {
+            return -1;
+        }
+        memcpy(spawn_path_buf, resolved, strlen(resolved) + 1);
+    }
+
+    /* Copy arguments to kernel buffer BEFORE overwriting */
+    spawn_argc = 0;
+    if (argv != (char **)0) {
+        while (argv[spawn_argc] != (char *)0 && spawn_argc < MAX_ARGC) {
+            len = strlen(argv[spawn_argc]);
+            if (len >= MAX_ARG_LEN) {
+                len = MAX_ARG_LEN - 1;
+            }
+            memcpy(spawn_argv_buf[spawn_argc], argv[spawn_argc], len);
+            spawn_argv_buf[spawn_argc][len] = '\0';
+            spawn_argc++;
+        }
+    }
+
+    /* Copy envp to process env if provided */
+    if (envp != (char **)0) {
+        int envc = 0;
+        cur->env_count = 0;
+        while (envp[envc] != (char *)0 && envc < MAX_ENVC) {
+            len = strlen(envp[envc]);
+            if (len >= MAX_ENV_LEN) {
+                len = MAX_ENV_LEN - 1;
+            }
+            memcpy(cur->env[envc], envp[envc], len);
+            cur->env[envc][len] = '\0';
+            envc++;
+        }
+        cur->env_count = envc;
+    }
+
+    /* Load the new program — overwrites current process memory */
+    result = elf_load_at(spawn_path_buf, cur->mem_base, PROC_SLOT_SIZE, &info);
+    if (result != LOAD_OK) {
+        return -1;  /* Load failed — original memory is corrupted, but return to caller */
+    }
+
+    /* Set up the new stack with arguments */
+    setup_user_stack(cur->stack_top, &sp, &argv_addr);
+
+    /* Reset trap frame for new program (keep c_trap_sp, c_trap) */
+    cur->tf.mepc = info.entry_point;
+    cur->tf.sp = sp;
+    cur->tf.ra = 0;
+    cur->tf.a0 = (uint32_t)spawn_argc;
+    cur->tf.a1 = argv_addr;
+
+    /* File descriptors are preserved across exec (Unix semantics).
+     * This allows pipe redirections set up via dup2() before exec
+     * to survive into the new program. */
+
+    /* Jump to new program — never returns */
+    trap_ret(&cur->tf);
+
+    /* Not reached */
+    return 0;
+}
+
+/*
+ * sys_wait - Wait for any child process to exit
+ *
+ * Returns: child's exit code if a zombie child exists,
+ *          puts parent to sleep if living children exist,
+ *          -1 if no children at all
+ */
+static int32_t sys_wait(trap_frame_t *tf) {
+    int i;
+    int has_children = 0;
+    (void)tf;
+
+    /* First pass: look for zombie children */
+    for (i = 0; i < MAX_PROCS; i++) {
+        if (proc_table[i].parent == current_proc &&
+            proc_table[i].state == PROC_ZOMBIE) {
+            /* Found a zombie child — collect exit code and free */
+            int exit_code = proc_table[i].exit_code;
+            proc_free(i);
+            return exit_code;
+        }
+    }
+
+    /* Second pass: check for any living children */
+    for (i = 0; i < MAX_PROCS; i++) {
+        if (proc_table[i].parent == current_proc &&
+            proc_table[i].state != PROC_FREE) {
+            has_children = 1;
+            break;
+        }
+    }
+
+    if (!has_children) {
+        return -1;  /* No children at all */
+    }
+
+    /* Living children but no zombies — sleep until one exits */
+    proc_table[current_proc].state = PROC_SLEEPING;
+    proc_table[current_proc].sleep_reason = SLEEP_WAIT;
+    proc_table[current_proc].sleep_chan = -1;
+    schedule();  /* never returns; sys_exit will wake us */
+
+    /* Not reached */
+    return 0;
+}
+
+/*
+ * sys_getpid - Return the PID of the current process
+ */
+static int32_t sys_getpid(void) {
+    return proc_table[current_proc].pid;
+}
+
+/*
+ * sys_dup - Duplicate a file descriptor
+ * a0 = oldfd
+ * Returns: new fd (lowest available), or -1 on error
+ */
+static int32_t sys_dup(trap_frame_t *tf) {
+    int oldfd = (int)tf->a0;
+    struct fd_entry *fds = proc_table[current_proc].fds;
+    int i;
+
+    if (get_fd(oldfd) == (struct fd_entry *)0) {
+        return -1;  /* EBADF */
+    }
+
+    /* Find lowest available fd (starting from 0) */
+    for (i = 0; i < MAX_FD; i++) {
+        if (!fds[i].in_use) {
+            fds[i] = fds[oldfd];
+            /* Increment pipe refcount for the new fd */
+            if (fds[i].type == FT_PIPE) {
+                pipe_dup_fd((int)fds[i].inode, (int)fds[i].minor);
+            }
+            return i;
+        }
+    }
+
+    return -1;  /* EMFILE — no free fd */
+}
+
+/*
+ * sys_dup2 - Duplicate a file descriptor to a specific fd number
+ * a0 = oldfd, a1 = newfd
+ * Returns: newfd on success, or -1 on error
+ */
+static int32_t sys_dup2(trap_frame_t *tf) {
+    int oldfd = (int)tf->a0;
+    int newfd = (int)tf->a1;
+    struct fd_entry *fds = proc_table[current_proc].fds;
+
+    if (get_fd(oldfd) == (struct fd_entry *)0) {
+        return -1;  /* EBADF */
+    }
+
+    if (newfd < 0 || newfd >= MAX_FD) {
+        return -1;  /* EBADF */
+    }
+
+    if (oldfd == newfd) {
+        return newfd;  /* No-op per POSIX */
+    }
+
+    /* Close newfd if open — handle pipe refcount decrement */
+    if (fds[newfd].in_use) {
+        if (fds[newfd].type == FT_PIPE) {
+            pipe_close_fd((int)fds[newfd].inode, (int)fds[newfd].minor);
+        }
+        fds[newfd].in_use = 0;
+    }
+
+    /* Copy fd_entry */
+    fds[newfd] = fds[oldfd];
+
+    /* Increment pipe refcount for the new fd */
+    if (fds[newfd].type == FT_PIPE) {
+        pipe_dup_fd((int)fds[newfd].inode, (int)fds[newfd].minor);
+    }
+
+    return newfd;
+}
+
+/*
+ * sys_pipe - Create a pipe
+ * a0 = pointer to int[2] array (user space)
+ *       pipefd[0] receives the read end
+ *       pipefd[1] receives the write end
+ * Returns: 0 on success, -1 on error
+ */
+static int32_t sys_pipe(trap_frame_t *tf) {
+    int *pipefd = (int *)tf->a0;
+    int pipe_idx;
+    int read_fd, write_fd;
+    struct fd_entry *fds = proc_table[current_proc].fds;
+    int i;
+
+    if (pipefd == (int *)0) {
+        return -1;
+    }
+
+    /* Find two free fds */
+    read_fd = -1;
+    write_fd = -1;
+    for (i = 0; i < MAX_FD; i++) {
+        if (!fds[i].in_use) {
+            if (read_fd < 0) {
+                read_fd = i;
+            } else {
+                write_fd = i;
+                break;
+            }
+        }
+    }
+    if (read_fd < 0 || write_fd < 0) {
+        return -1;  /* EMFILE - not enough free fds */
+    }
+
+    /* Allocate pipe */
+    pipe_idx = pipe_alloc();
+    if (pipe_idx < 0) {
+        return -1;  /* ENFILE - no free pipe slots */
+    }
+
+    /* Set up read end fd */
+    fds[read_fd].in_use = 1;
+    fds[read_fd].type = FT_PIPE;
+    fds[read_fd].inode = (uint32_t)pipe_idx;
+    fds[read_fd].offset = 0;
+    fds[read_fd].major = 0;
+    fds[read_fd].minor = 0;  /* 0 = read end */
+
+    /* Set up write end fd */
+    fds[write_fd].in_use = 1;
+    fds[write_fd].type = FT_PIPE;
+    fds[write_fd].inode = (uint32_t)pipe_idx;
+    fds[write_fd].offset = 0;
+    fds[write_fd].major = 0;
+    fds[write_fd].minor = 1;  /* 1 = write end */
+
+    /* Write fd numbers to user-space array */
+    pipefd[0] = read_fd;
+    pipefd[1] = write_fd;
+
     return 0;
 }
 
@@ -792,6 +1243,221 @@ static int32_t sys_getenv_entry(trap_frame_t *tf) {
 }
 
 /*
+ * sys_unlink - Delete a file
+ * a0 = path
+ * Returns: 0 on success, negative error
+ */
+static int32_t sys_unlink(trap_frame_t *tf) {
+    const char *path = (const char *)tf->a0;
+    char resolved[MAX_ARG_LEN];
+    uint32_t parent_ino;
+    const char *name;
+
+    if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
+        return FS_ERR_INVALID;
+    }
+
+    int result = resolve_parent(resolved, &parent_ino, &name);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    return file_delete(parent_ino, name);
+}
+
+/*
+ * sys_link - Create a hard link
+ * a0 = target path (existing file), a1 = link path (new name)
+ * Returns: 0 on success, negative error
+ */
+static int32_t sys_link(trap_frame_t *tf) {
+    const char *target = (const char *)tf->a0;
+    const char *linkpath = (const char *)tf->a1;
+    char resolved_target[MAX_ARG_LEN];
+    char resolved_link[MAX_ARG_LEN];
+    uint32_t target_ino;
+    uint32_t link_parent_ino;
+    const char *link_name;
+    struct inode in;
+
+    if (resolve_path(target, resolved_target, MAX_ARG_LEN) < 0) {
+        return FS_ERR_INVALID;
+    }
+    int result = fs_open(resolved_target, &target_ino);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    if (inode_read(target_ino, &in) != FS_OK) {
+        return FS_ERR_IO;
+    }
+    if (in.type != FT_FILE) {
+        return FS_ERR_INVALID;
+    }
+
+    if (resolve_path(linkpath, resolved_link, MAX_ARG_LEN) < 0) {
+        return FS_ERR_INVALID;
+    }
+    result = resolve_parent(resolved_link, &link_parent_ino, &link_name);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    result = dir_add(link_parent_ino, link_name, target_ino);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    in.link_count++;
+    return inode_write(target_ino, &in);
+}
+
+/*
+ * sys_rename - Rename/move a file or directory
+ * a0 = old path, a1 = new path
+ * Returns: 0 on success, negative error
+ */
+static int32_t sys_rename(trap_frame_t *tf) {
+    const char *oldpath = (const char *)tf->a0;
+    const char *newpath = (const char *)tf->a1;
+    char resolved_old[MAX_ARG_LEN];
+    char resolved_new[MAX_ARG_LEN];
+    uint32_t old_parent_ino, new_parent_ino;
+    const char *old_name, *new_name;
+    uint32_t file_ino;
+
+    if (resolve_path(oldpath, resolved_old, MAX_ARG_LEN) < 0) {
+        return FS_ERR_INVALID;
+    }
+    int result = resolve_parent(resolved_old, &old_parent_ino, &old_name);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    result = dir_lookup(old_parent_ino, old_name, &file_ino);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    if (resolve_path(newpath, resolved_new, MAX_ARG_LEN) < 0) {
+        return FS_ERR_INVALID;
+    }
+    result = resolve_parent(resolved_new, &new_parent_ino, &new_name);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    result = dir_add(new_parent_ino, new_name, file_ino);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    result = dir_remove(old_parent_ino, old_name);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    /* If directory, update ".." to point to new parent */
+    struct inode in;
+    if (inode_read(file_ino, &in) == FS_OK && in.type == FT_DIR) {
+        dir_remove(file_ino, "..");
+        dir_add(file_ino, "..", new_parent_ino);
+    }
+
+    return FS_OK;
+}
+
+/*
+ * sys_stat - Get file metadata
+ * a0 = path, a1 = pointer to struct stat_info
+ * Returns: 0 on success, negative error
+ */
+static int32_t sys_stat(trap_frame_t *tf) {
+    const char *path = (const char *)tf->a0;
+    struct stat_info *si = (struct stat_info *)tf->a1;
+    char resolved[MAX_ARG_LEN];
+    uint32_t ino;
+    struct inode in;
+
+    if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
+        return FS_ERR_INVALID;
+    }
+
+    int result = fs_open(resolved, &ino);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    if (inode_read(ino, &in) != FS_OK) {
+        return FS_ERR_IO;
+    }
+
+    si->ino = ino;
+    si->size = in.size;
+    si->type = in.type;
+    si->link_count = in.link_count;
+    si->major = in.major;
+    si->minor = in.minor;
+    return FS_OK;
+}
+
+/*
+ * sys_kill - Terminate a process by PID
+ * a0 = pid
+ * Returns: 0 on success, -1 if process not found
+ */
+static int32_t sys_kill(trap_frame_t *tf) {
+    int target_pid = (int)tf->a0;
+    int i;
+
+    for (i = 0; i < MAX_PROCS; i++) {
+        if (proc_table[i].state != PROC_FREE && proc_table[i].pid == target_pid) {
+            if (i == current_proc) return -1;
+            if (proc_table[i].parent == -1) return -1;
+
+            proc_table[i].state = PROC_ZOMBIE;
+            proc_table[i].exit_code = -1;
+
+            /* Wake parent if waiting */
+            int parent = proc_table[i].parent;
+            if (parent >= 0 && proc_table[parent].state == PROC_SLEEPING &&
+                (proc_table[parent].sleep_reason == SLEEP_WAIT ||
+                 (proc_table[parent].sleep_reason == SLEEP_CHILD &&
+                  proc_table[parent].sleep_chan == i))) {
+                proc_table[parent].state = PROC_READY;
+            }
+
+            return 0;
+        }
+    }
+
+    return -1;
+}
+
+/*
+ * sys_ps - List active processes
+ * a0 = pointer to array of struct proc_info, a1 = max entries
+ * Returns: number of entries filled
+ */
+static int32_t sys_ps(trap_frame_t *tf) {
+    struct proc_info *buf = (struct proc_info *)tf->a0;
+    int max_entries = (int)tf->a1;
+    int count = 0;
+    int i;
+
+    for (i = 0; i < MAX_PROCS && count < max_entries; i++) {
+        if (proc_table[i].state != PROC_FREE) {
+            buf[count].pid = proc_table[i].pid;
+            buf[count].state = proc_table[i].state;
+            buf[count].parent = proc_table[i].parent;
+            count++;
+        }
+    }
+
+    return count;
+}
+
+/*
  * Dispatch a system call.
  * Returns 1 if the top-level program should exit (shell with no parent),
  * 0 otherwise.
@@ -870,6 +1536,60 @@ int syscall_dispatch(trap_frame_t *tf) {
 
         case SYS_chdir:
             result = sys_chdir(tf);
+            break;
+
+        case SYS_fork:
+            result = sys_fork(tf);
+            break;
+
+        case SYS_exec:
+            result = sys_exec(tf);
+            /* If we get here, exec failed — return error to caller */
+            break;
+
+        case SYS_wait:
+            result = sys_wait(tf);
+            /* If we get here, wait returned immediately (zombie or no children) */
+            break;
+
+        case SYS_getpid:
+            result = sys_getpid();
+            break;
+
+        case SYS_dup:
+            result = sys_dup(tf);
+            break;
+
+        case SYS_dup2:
+            result = sys_dup2(tf);
+            break;
+
+        case SYS_pipe:
+            result = sys_pipe(tf);
+            break;
+
+        case SYS_unlink:
+            result = sys_unlink(tf);
+            break;
+
+        case SYS_link:
+            result = sys_link(tf);
+            break;
+
+        case SYS_rename:
+            result = sys_rename(tf);
+            break;
+
+        case SYS_stat:
+            result = sys_stat(tf);
+            break;
+
+        case SYS_kill:
+            result = sys_kill(tf);
+            break;
+
+        case SYS_ps:
+            result = sys_ps(tf);
             break;
 
         default:

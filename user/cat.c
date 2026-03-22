@@ -1,38 +1,44 @@
 /*
- * cat - read a file byte by byte and print to stdout
- * Used to test EOF handling on regular files.
+ * cat - Concatenate and print files
+ * Licensed under Creative Commons Attribution International License 4.0
+ *
+ * Usage:
+ *   cat              Read from stdin until EOF
+ *   cat <file>       Print contents of file
+ *
+ * Useful as a pipeline component: echo hello | cat, cat < file.txt
  */
 
 #include "libc.h"
 
-int main(void) {
+int main(int argc, char *argv[])
+{
     int fd;
-    char c;
+    char buf[64];
     int n;
-    int total = 0;
 
-    fd = open("/etc/hello.txt", O_RDONLY);
-    if (fd < 0) {
-        puts("cat: cannot open /etc/hello.txt");
-        return 1;
+    if (argc > 1) {
+        /* Open the specified file */
+        fd = open(argv[1], O_RDONLY);
+        if (fd < 0) {
+            printf("cat: %s: No such file\n", argv[1]);
+            return 1;
+        }
+    } else {
+        /* No arguments — read from stdin */
+        fd = STDIN_FILENO;
     }
 
-    printf("cat: opened fd=%d, reading byte by byte...\n", fd);
-
+    /* Read and write loop */
     while (1) {
-        n = read(fd, &c, 1);
-        if (n < 0) {
-            printf("cat: read error %d after %d bytes\n", n, total);
-            break;
-        }
-        if (n == 0) {
-            printf("\ncat: EOF after %d bytes\n", total);
-            break;
-        }
-        putchar(c);
-        total++;
+        n = read(fd, buf, sizeof(buf));
+        if (n <= 0) break;  /* EOF or error */
+        write(STDOUT_FILENO, buf, n);
     }
 
-    close(fd);
+    if (fd != STDIN_FILENO) {
+        close(fd);
+    }
+
     return 0;
 }

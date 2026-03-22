@@ -3,7 +3,7 @@
  * Licensed under Creative Commons Attribution International License 4.0
  *
  * Initializes trap handling, mounts filesystem, loads and executes user programs.
- * Each program runs in its own 64KB memory slot with a per-process trap frame.
+ * Each program runs in its own 32KB memory slot with a per-process trap frame.
  */
 
 #include "fs.h"
@@ -17,6 +17,11 @@
 /* Kernel trap stack - used when handling traps from user programs */
 #define TRAP_STACK_SIZE 4096
 static uint8_t trap_stack[TRAP_STACK_SIZE] __attribute__((aligned(16)));
+
+/* Timer MMIO registers */
+#define TIMER_MTIME    ((volatile uint32_t *)0x200bff8)
+#define TIMER_MTIMECMP ((volatile uint32_t *)0x2004000)
+#define TIME_SLICE     800
 
 /* Flag to indicate the current top-level program has exited */
 volatile int program_should_exit = 0;
@@ -44,6 +49,11 @@ void c_trap_handler(trap_frame_t *tf) {
         }
         /* Normal syscall - return to user program */
         trap_ret(tf);
+    } else if (cause == (MCAUSE_INTERRUPT | MCAUSE_TIMER)) {
+        /* Timer interrupt — advance alarm, preempt current, reschedule */
+        *TIMER_MTIMECMP = *TIMER_MTIME + TIME_SLICE;
+        proc_table[current_proc].state = PROC_READY;
+        schedule();  /* never returns */
     } else if (cause & MCAUSE_INTERRUPT) {
         printf("KERNEL: Unexpected interrupt, mcause=0x%x\n", cause);
         trap_ret(tf);
@@ -84,6 +94,10 @@ int main(void)
         return result;
     }
     printf("Filesystem mounted.\n\n");
+
+    /* Enable timer interrupts for preemptive scheduling */
+    timer_init();
+
     printf("Starting shell\n");
     printf("Type 'help' for available commands\n\n");
 

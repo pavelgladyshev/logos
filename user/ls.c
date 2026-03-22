@@ -33,7 +33,6 @@ int main(int argc, char *argv[])
     int i;
     for (i = 0; i < count; i++) {
         puts(entries[i].name);
-        putchar('\n');
     }
 
     return 0;

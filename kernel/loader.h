@@ -23,8 +23,8 @@
 
 /* Memory layout for loaded programs */
 #define PROGRAM_LOAD_ADDR   0x00110000  /* Default base address for programs */
-#define PROGRAM_MAX_SIZE    0x000E0000  /* ~896KB max program size */
-#define PROGRAM_STACK_TOP   0x001FFF00  /* Initial stack pointer for programs */
+#define PROGRAM_MAX_SIZE    0x00008000  /* 32KB max program size (one slot) */
+#define PROGRAM_STACK_TOP   0x00117F00  /* Initial stack pointer (slot 0 top - 0x100) */
 
 /* Program information returned by loader */
 struct program_info {

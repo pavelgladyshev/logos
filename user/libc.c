@@ -24,6 +24,15 @@ int spawn(const char *path, char *const argv[])
 }
 
 /*
+ * exec() convenience wrapper — calls execve() with NULL envp,
+ * which keeps the current process's environment unchanged.
+ */
+int exec(const char *path, char *const argv[])
+{
+    return execve(path, argv, (char *const *)0);
+}
+
+/*
  * Standard I/O functions
  */
 

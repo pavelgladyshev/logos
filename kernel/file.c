@@ -276,6 +276,11 @@ int file_delete(uint32_t dir_ino, const char *name) {
         return err;
     }
 
-    /* Free the inode */
+    /* Decrement link count; only free inode when no links remain */
+    if (in.link_count > 1) {
+        in.link_count--;
+        return inode_write(file_ino, &in);
+    }
+
     return inode_free(file_ino);
 }

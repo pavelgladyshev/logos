@@ -18,8 +18,13 @@ typedef int ssize_t;
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
 
-/* Open flags (simplified) */
-#define O_RDONLY 0
+/* Open flags */
+#define O_RDONLY  0
+#define O_WRONLY  1
+#define O_RDWR    2
+#define O_CREAT   0x100
+#define O_TRUNC   0x200
+#define O_APPEND  0x400
 
 /*
  * System call wrappers
@@ -58,6 +63,47 @@ int spawn(const char *path, char *const argv[]);
  */
 int chdir(const char *path);
 
+/* Fork the current process.
+ * Returns: child PID to parent, 0 to child, -1 on error.
+ */
+int fork(void);
+
+/* Replace current process image with a new program.
+ * path: path to executable
+ * argv: NULL-terminated array of argument strings
+ * envp: NULL-terminated array of "KEY=value" strings (or NULL to keep env)
+ * Returns -1 on failure (never returns on success).
+ */
+int execve(const char *path, char *const argv[], char *const envp[]);
+
+/* Convenience wrapper: calls execve(path, argv, NULL) */
+int exec(const char *path, char *const argv[]);
+
+/* Wait for any child process to exit.
+ * Returns child's exit code, or -1 if no children.
+ */
+int wait(void);
+
+/* Return the PID of the current process. */
+int getpid(void);
+
+/* Duplicate a file descriptor.
+ * Returns the lowest available fd that is a copy of oldfd, or -1 on error.
+ */
+int dup(int oldfd);
+
+/* Duplicate a file descriptor to a specific fd number.
+ * Closes newfd first if it is open.
+ * Returns newfd on success, or -1 on error.
+ */
+int dup2(int oldfd, int newfd);
+
+/* Create a pipe.
+ * pipefd[0] receives the read end, pipefd[1] receives the write end.
+ * Returns 0 on success, -1 on error.
+ */
+int pipe(int pipefd[2]);
+
 /*
  * Filesystem operations
  */
@@ -69,6 +115,23 @@ int chdir(const char *path);
 struct dirent {
     unsigned int inode;          /* Inode number (0 = entry is free) */
     char         name[MAX_FILENAME]; /* Filename (null-terminated) */
+};
+
+/* File metadata (matches kernel's struct stat_info) */
+struct stat_info {
+    unsigned int ino;            /* Inode number */
+    unsigned int size;           /* File size in bytes */
+    unsigned char type;          /* File type */
+    unsigned char link_count;    /* Number of hard links */
+    unsigned char major;         /* Major device number */
+    unsigned char minor;         /* Minor device number */
+};
+
+/* Process information (matches kernel's struct proc_info) */
+struct proc_info {
+    int pid;                     /* Process ID */
+    int state;                   /* Process state */
+    int parent;                  /* Parent slot index */
 };
 
 /* List directory entries.
@@ -87,6 +150,24 @@ int rmdir(const char *path);
 
 /* Create a device node */
 int mknod(const char *path, int major, int minor);
+
+/* Delete a file */
+int unlink(const char *path);
+
+/* Create a hard link (new name for existing file) */
+int link(const char *target, const char *linkpath);
+
+/* Rename/move a file or directory */
+int rename(const char *oldpath, const char *newpath);
+
+/* Get file metadata */
+int stat(const char *path, struct stat_info *si);
+
+/* Terminate a process by PID */
+int kill(int pid);
+
+/* List active processes */
+int ps(struct proc_info *buf, int max_entries);
 
 /*
  * Environment variables
@@ -130,7 +211,7 @@ int env_to_envp(char *envp[]);
 /* Write a single character to stdout */
 int putchar(int c);
 
-/* Write a string to stdout (no newline added) */
+/* Write a string followed by newline to stdout (C standard) */
 int puts(const char *s);
 
 /* Formatted output to stdout */

@@ -67,12 +67,13 @@ KERNEL_OBJS = kernel/crt0.o kernel/string.o kernel/console.o kernel/block.o \
               kernel/inode.o kernel/dir.o kernel/file.o kernel/fs.o \
               kernel/device.o kernel/console_dev.o kernel/loader.o \
               kernel/loader_asm.o kernel/trap.o kernel/process.o \
-              kernel/syscall.o kernel/main.o
+              kernel/pipe.o kernel/syscall.o kernel/main.o
 
 KERNEL_HEADERS = kernel/fs.h kernel/types.h kernel/fs_types.h kernel/string.h \
                  kernel/console.h kernel/block.h kernel/inode.h kernel/dir.h \
                  kernel/file.h kernel/device.h kernel/console_dev.h kernel/elf.h \
-                 kernel/loader.h kernel/trap.h kernel/syscall.h kernel/process.h
+                 kernel/loader.h kernel/trap.h kernel/syscall.h kernel/process.h \
+                 kernel/pipe.h
 
 kernel/%.o: kernel/%.c $(KERNEL_HEADERS)
 	$(RISCV_TOOL_PREFIX)gcc $(RISCV_CFLAGS) -Ikernel -c $< -o $@
@@ -187,13 +188,121 @@ cat.elf: $(CAT_OBJS)
 	$(RISCV_TOOL_PREFIX)nm cat-debug.elf > cat.sym
 	$(RISCV_TOOL_PREFIX)strip -s cat-debug.elf -o cat.elf
 
-user-programs: hello.elf spawn_demo.elf shell.elf ls.elf mkdir.elf rmdir.elf mknod.elf env_demo.elf cat.elf
+# Fork demo program
+FORK_DEMO_OBJS = $(USER_COMMON_OBJS) user/fork_demo.user.o
+
+fork_demo.elf: $(FORK_DEMO_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o fork_demo-debug.elf -T $(USER_LINKER_SCRIPT) $(FORK_DEMO_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S fork_demo-debug.elf > fork_demo.asm
+	$(RISCV_TOOL_PREFIX)nm fork_demo-debug.elf > fork_demo.sym
+	$(RISCV_TOOL_PREFIX)strip -s fork_demo-debug.elf -o fork_demo.elf
+
+# Pipe demo program
+PIPE_DEMO_OBJS = $(USER_COMMON_OBJS) user/pipe_demo.user.o
+
+pipe_demo.elf: $(PIPE_DEMO_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o pipe_demo-debug.elf -T $(USER_LINKER_SCRIPT) $(PIPE_DEMO_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S pipe_demo-debug.elf > pipe_demo.asm
+	$(RISCV_TOOL_PREFIX)nm pipe_demo-debug.elf > pipe_demo.sym
+	$(RISCV_TOOL_PREFIX)strip -s pipe_demo-debug.elf -o pipe_demo.elf
+
+# Pipe test program
+PIPE_TEST_OBJS = $(USER_COMMON_OBJS) user/pipe_test.user.o
+
+pipe_test.elf: $(PIPE_TEST_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o pipe_test-debug.elf -T $(USER_LINKER_SCRIPT) $(PIPE_TEST_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S pipe_test-debug.elf > pipe_test.asm
+	$(RISCV_TOOL_PREFIX)nm pipe_test-debug.elf > pipe_test.sym
+	$(RISCV_TOOL_PREFIX)strip -s pipe_test-debug.elf -o pipe_test.elf
+
+# Redirection test program
+REDIR_TEST_OBJS = $(USER_COMMON_OBJS) user/redir_test.user.o
+
+redir_test.elf: $(REDIR_TEST_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o redir_test-debug.elf -T $(USER_LINKER_SCRIPT) $(REDIR_TEST_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S redir_test-debug.elf > redir_test.asm
+	$(RISCV_TOOL_PREFIX)nm redir_test-debug.elf > redir_test.sym
+	$(RISCV_TOOL_PREFIX)strip -s redir_test-debug.elf -o redir_test.elf
+
+# File descriptor test program
+FD_TEST_OBJS = $(USER_COMMON_OBJS) user/fd_test.user.o
+
+fd_test.elf: $(FD_TEST_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o fd_test-debug.elf -T $(USER_LINKER_SCRIPT) $(FD_TEST_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S fd_test-debug.elf > fd_test.asm
+	$(RISCV_TOOL_PREFIX)nm fd_test-debug.elf > fd_test.sym
+	$(RISCV_TOOL_PREFIX)strip -s fd_test-debug.elf -o fd_test.elf
+
+# Rm program
+RM_OBJS = $(USER_COMMON_OBJS) user/rm.user.o
+
+rm.elf: $(RM_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o rm-debug.elf -T $(USER_LINKER_SCRIPT) $(RM_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S rm-debug.elf > rm.asm
+	$(RISCV_TOOL_PREFIX)nm rm-debug.elf > rm.sym
+	$(RISCV_TOOL_PREFIX)strip -s rm-debug.elf -o rm.elf
+
+# Mv program
+MV_OBJS = $(USER_COMMON_OBJS) user/mv.user.o
+
+mv.elf: $(MV_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o mv-debug.elf -T $(USER_LINKER_SCRIPT) $(MV_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S mv-debug.elf > mv.asm
+	$(RISCV_TOOL_PREFIX)nm mv-debug.elf > mv.sym
+	$(RISCV_TOOL_PREFIX)strip -s mv-debug.elf -o mv.elf
+
+# Ln program
+LN_OBJS = $(USER_COMMON_OBJS) user/ln.user.o
+
+ln.elf: $(LN_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o ln-debug.elf -T $(USER_LINKER_SCRIPT) $(LN_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S ln-debug.elf > ln.asm
+	$(RISCV_TOOL_PREFIX)nm ln-debug.elf > ln.sym
+	$(RISCV_TOOL_PREFIX)strip -s ln-debug.elf -o ln.elf
+
+# Cp program
+CP_OBJS = $(USER_COMMON_OBJS) user/cp.user.o
+
+cp.elf: $(CP_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o cp-debug.elf -T $(USER_LINKER_SCRIPT) $(CP_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S cp-debug.elf > cp.asm
+	$(RISCV_TOOL_PREFIX)nm cp-debug.elf > cp.sym
+	$(RISCV_TOOL_PREFIX)strip -s cp-debug.elf -o cp.elf
+
+# Ps program
+PS_OBJS = $(USER_COMMON_OBJS) user/ps.user.o
+
+ps.elf: $(PS_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o ps-debug.elf -T $(USER_LINKER_SCRIPT) $(PS_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S ps-debug.elf > ps.asm
+	$(RISCV_TOOL_PREFIX)nm ps-debug.elf > ps.sym
+	$(RISCV_TOOL_PREFIX)strip -s ps-debug.elf -o ps.elf
+
+# Kill program
+KILL_OBJS = $(USER_COMMON_OBJS) user/kill.user.o
+
+kill.elf: $(KILL_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o kill-debug.elf -T $(USER_LINKER_SCRIPT) $(KILL_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S kill-debug.elf > kill.asm
+	$(RISCV_TOOL_PREFIX)nm kill-debug.elf > kill.sym
+	$(RISCV_TOOL_PREFIX)strip -s kill-debug.elf -o kill.elf
+
+# Ed program (line editor)
+ED_OBJS = $(USER_COMMON_OBJS) user/ed.user.o
+
+ed.elf: $(ED_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o ed-debug.elf -T $(USER_LINKER_SCRIPT) $(ED_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S ed-debug.elf > ed.asm
+	$(RISCV_TOOL_PREFIX)nm ed-debug.elf > ed.sym
+	$(RISCV_TOOL_PREFIX)strip -s ed-debug.elf -o ed.elf
+
+user-programs: hello.elf spawn_demo.elf shell.elf ls.elf mkdir.elf rmdir.elf mknod.elf env_demo.elf cat.elf fork_demo.elf pipe_demo.elf pipe_test.elf redir_test.elf fd_test.elf rm.elf mv.elf ln.elf cp.elf ps.elf kill.elf ed.elf
 
 # Check user programs for PIE compatibility
-check-pie: $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS)
+check-pie: $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS) $(FORK_DEMO_OBJS) $(PIPE_DEMO_OBJS) $(PIPE_TEST_OBJS) $(REDIR_TEST_OBJS) $(FD_TEST_OBJS) $(RM_OBJS) $(MV_OBJS) $(LN_OBJS) $(CP_OBJS) $(PS_OBJS) $(KILL_OBJS) $(ED_OBJS)
 	@echo "=== Checking user program object files for PIE compatibility ==="
 	@FAILED=0; \
-	for obj in $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS); do \
+	for obj in $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS) $(FORK_DEMO_OBJS) $(PIPE_DEMO_OBJS) $(PIPE_TEST_OBJS) $(REDIR_TEST_OBJS) $(FD_TEST_OBJS) $(RM_OBJS) $(MV_OBJS) $(LN_OBJS) $(CP_OBJS) $(PS_OBJS) $(KILL_OBJS) $(ED_OBJS); do \
 		if ! ./check_pie.sh $$obj > /dev/null 2>&1; then \
 			./check_pie.sh $$obj; \
 			FAILED=1; \
@@ -233,8 +342,8 @@ $(FSTOOL_BIN): $(FSTOOL_OBJS)
 # Filesystem image
 # ====================================
 
-fs-image: $(FSTOOL_BIN) kernel.bin hello.elf spawn_demo.elf shell.elf ls.elf mkdir.elf rmdir.elf mknod.elf env_demo.elf cat.elf
-	$(FSTOOL_BIN) format block_storage.bin 256
+fs-image: $(FSTOOL_BIN) kernel.bin hello.elf spawn_demo.elf shell.elf ls.elf mkdir.elf rmdir.elf mknod.elf env_demo.elf cat.elf fork_demo.elf pipe_demo.elf pipe_test.elf redir_test.elf fd_test.elf rm.elf mv.elf ln.elf cp.elf ps.elf kill.elf ed.elf
+	$(FSTOOL_BIN) format block_storage.bin 512
 	$(FSTOOL_BIN) mkdir block_storage.bin /boot
 	$(FSTOOL_BIN) mkdir block_storage.bin /bin
 	$(FSTOOL_BIN) mkdir block_storage.bin /etc
@@ -248,6 +357,18 @@ fs-image: $(FSTOOL_BIN) kernel.bin hello.elf spawn_demo.elf shell.elf ls.elf mkd
 	$(FSTOOL_BIN) add block_storage.bin /bin/mknod mknod.elf
 	$(FSTOOL_BIN) add block_storage.bin /bin/env_demo env_demo.elf
 	$(FSTOOL_BIN) add block_storage.bin /bin/cat cat.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/fork_demo fork_demo.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/pipe_demo pipe_demo.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/pipe_test pipe_test.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/redir_test redir_test.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/fd_test fd_test.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/rm rm.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/mv mv.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/ln ln.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/cp cp.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/ps ps.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/kill kill.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/ed ed.elf
 	$(FSTOOL_BIN) add block_storage.bin /etc/hello.txt hello.txt
 	@echo "Filesystem image created."
 
@@ -293,7 +414,7 @@ clean-kernel:
 	rm -f $(KERNEL_OBJS) kernel-debug.elf kernel.bin kernel.map kernel.sym kernel.asm
 
 clean-user:
-	rm -f $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS)
+	rm -f $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS) $(FORK_DEMO_OBJS) $(PIPE_DEMO_OBJS) $(PIPE_TEST_OBJS) $(REDIR_TEST_OBJS) $(FD_TEST_OBJS) $(RM_OBJS) $(MV_OBJS) $(LN_OBJS) $(CP_OBJS) $(PS_OBJS) $(KILL_OBJS) $(ED_OBJS)
 	rm -f hello.elf hello-debug.elf hello.asm hello.sym
 	rm -f spawn_demo.elf spawn_demo-debug.elf spawn_demo.asm spawn_demo.sym
 	rm -f shell.elf shell-debug.elf shell.asm shell.sym
@@ -303,6 +424,18 @@ clean-user:
 	rm -f mknod.elf mknod-debug.elf mknod.asm mknod.sym
 	rm -f env_demo.elf env_demo-debug.elf env_demo.asm env_demo.sym
 	rm -f cat.elf cat-debug.elf cat.asm cat.sym
+	rm -f fork_demo.elf fork_demo-debug.elf fork_demo.asm fork_demo.sym
+	rm -f pipe_demo.elf pipe_demo-debug.elf pipe_demo.asm pipe_demo.sym
+	rm -f pipe_test.elf pipe_test-debug.elf pipe_test.asm pipe_test.sym
+	rm -f redir_test.elf redir_test-debug.elf redir_test.asm redir_test.sym
+	rm -f fd_test.elf fd_test-debug.elf fd_test.asm fd_test.sym
+	rm -f rm.elf rm-debug.elf rm.asm rm.sym
+	rm -f mv.elf mv-debug.elf mv.asm mv.sym
+	rm -f ln.elf ln-debug.elf ln.asm ln.sym
+	rm -f cp.elf cp-debug.elf cp.asm cp.sym
+	rm -f ps.elf ps-debug.elf ps.asm ps.sym
+	rm -f kill.elf kill-debug.elf kill.asm kill.sym
+	rm -f ed.elf ed-debug.elf ed.asm ed.sym
 
 clean-fstool:
 	rm -f $(FSTOOL_OBJS) $(FSTOOL_BIN)
