@@ -80,7 +80,7 @@ int main(void)
     struct program_info info;
     int last_exit_code = 0;
 
-    printf("Welcome to logOS Belfield 1.0!\n\n");
+    printf("Welcome to logOS 2.0 Blackrock!\n\n");
 
     /* Initialize subsystems */
     console_dev_init();

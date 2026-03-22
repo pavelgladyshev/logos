@@ -10,8 +10,8 @@
 #define MAX_PROCS 8
 
 /* Process states (must match kernel/process.h) */
-#define PROC_RUNNING  1
-#define PROC_READY    2
+#define PROC_READY    1
+#define PROC_RUNNING  2
 #define PROC_SLEEPING 3
 #define PROC_ZOMBIE   4
 
