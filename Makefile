@@ -28,7 +28,7 @@ BUILD_DIR = build
 RISCV_CFLAGS = -O -march=$(RISCV_ISA) -mabi=$(RISCV_ABI) -mcmodel=medany -g $(CFLAGS)
 
 # Default target: build bootloader ROM image
-.DEFAULT_GOAL := $(BUILD_DIR)/boot-rom.txt
+.DEFAULT_GOAL := boot-rom.txt
 
 # Create build directory
 $(BUILD_DIR):
@@ -54,16 +54,16 @@ $(BUILD_DIR)/bootloader: $(BOOT_OBJS) | $(BUILD_DIR)
 	$(RISCV_TOOL_PREFIX)objdump -S $(BUILD_DIR)/bootloader > $(BUILD_DIR)/bootloader.asm
 	$(RISCV_TOOL_PREFIX)nm $(BUILD_DIR)/bootloader > $(BUILD_DIR)/bootloader.sym
 
-$(BUILD_DIR)/boot-rom: $(BUILD_DIR)/bootloader
+boot-rom: $(BUILD_DIR)/bootloader
 	$(RISCV_TOOL_PREFIX)objcopy --only-section .init --only-section .text --only-section .rodata \
 		--only-section .srodata --only-section .data --only-section .sdata \
 		--only-section .text.* --only-section .rodata.* --only-section .srodata.* \
 		--only-section .data.* --only-section .sdata.* \
-		--output-target binary $(BUILD_DIR)/bootloader $(BUILD_DIR)/boot-rom
+		--output-target binary $(BUILD_DIR)/bootloader boot-rom
 
-$(BUILD_DIR)/boot-rom.txt: $(BUILD_DIR)/boot-rom
-	echo "v2.0 raw" > $(BUILD_DIR)/boot-rom.txt
-	hexdump -v -e '/4 "%08x""\n"""' $(BUILD_DIR)/boot-rom >> $(BUILD_DIR)/boot-rom.txt
+boot-rom.txt: boot-rom
+	echo "v2.0 raw" > boot-rom.txt
+	hexdump -v -e '/4 "%08x""\n"""' boot-rom >> boot-rom.txt
 
 # ====================================
 # Kernel build (for RAM, loaded by bootloader)
@@ -357,33 +357,33 @@ $(FSTOOL_BIN): $(FSTOOL_OBJS)
 # ====================================
 
 fs-image: $(FSTOOL_BIN) $(BUILD_DIR)/kernel.bin $(USER_ELFS) | $(BUILD_DIR)
-	$(FSTOOL_BIN) format $(BUILD_DIR)/block_storage.bin 1024
-	$(FSTOOL_BIN) mkdir $(BUILD_DIR)/block_storage.bin /boot
-	$(FSTOOL_BIN) mkdir $(BUILD_DIR)/block_storage.bin /bin
-	$(FSTOOL_BIN) mkdir $(BUILD_DIR)/block_storage.bin /etc
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /boot/kernel $(BUILD_DIR)/kernel.bin
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/hello $(BUILD_DIR)/hello.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/spawn_demo $(BUILD_DIR)/spawn_demo.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/sh $(BUILD_DIR)/shell.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/ls $(BUILD_DIR)/ls.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/mkdir $(BUILD_DIR)/mkdir.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/rmdir $(BUILD_DIR)/rmdir.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/mknod $(BUILD_DIR)/mknod.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/env_demo $(BUILD_DIR)/env_demo.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/cat $(BUILD_DIR)/cat.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/fork_demo $(BUILD_DIR)/fork_demo.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/pipe_demo $(BUILD_DIR)/pipe_demo.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/pipe_test $(BUILD_DIR)/pipe_test.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/redir_test $(BUILD_DIR)/redir_test.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/fd_test $(BUILD_DIR)/fd_test.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/rm $(BUILD_DIR)/rm.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/mv $(BUILD_DIR)/mv.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/ln $(BUILD_DIR)/ln.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/cp $(BUILD_DIR)/cp.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/ps $(BUILD_DIR)/ps.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/kill $(BUILD_DIR)/kill.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /bin/ed $(BUILD_DIR)/ed.elf
-	$(FSTOOL_BIN) add $(BUILD_DIR)/block_storage.bin /etc/hello.txt hello.txt
+	$(FSTOOL_BIN) format block_storage.bin 1024
+	$(FSTOOL_BIN) mkdir block_storage.bin /boot
+	$(FSTOOL_BIN) mkdir block_storage.bin /bin
+	$(FSTOOL_BIN) mkdir block_storage.bin /etc
+	$(FSTOOL_BIN) add block_storage.bin /boot/kernel $(BUILD_DIR)/kernel.bin
+	$(FSTOOL_BIN) add block_storage.bin /bin/hello $(BUILD_DIR)/hello.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/spawn_demo $(BUILD_DIR)/spawn_demo.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/sh $(BUILD_DIR)/shell.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/ls $(BUILD_DIR)/ls.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/mkdir $(BUILD_DIR)/mkdir.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/rmdir $(BUILD_DIR)/rmdir.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/mknod $(BUILD_DIR)/mknod.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/env_demo $(BUILD_DIR)/env_demo.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/cat $(BUILD_DIR)/cat.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/fork_demo $(BUILD_DIR)/fork_demo.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/pipe_demo $(BUILD_DIR)/pipe_demo.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/pipe_test $(BUILD_DIR)/pipe_test.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/redir_test $(BUILD_DIR)/redir_test.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/fd_test $(BUILD_DIR)/fd_test.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/rm $(BUILD_DIR)/rm.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/mv $(BUILD_DIR)/mv.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/ln $(BUILD_DIR)/ln.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/cp $(BUILD_DIR)/cp.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/ps $(BUILD_DIR)/ps.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/kill $(BUILD_DIR)/kill.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/ed $(BUILD_DIR)/ed.elf
+	$(FSTOOL_BIN) add block_storage.bin /etc/hello.txt hello.txt
 	@echo "Filesystem image created."
 
 # ====================================
@@ -414,7 +414,7 @@ qemu-gdb: compile-for-qemu
 # Build everything
 # ====================================
 
-all: $(BUILD_DIR)/boot-rom.txt fs-image
+all: boot-rom.txt fs-image
 
 # ====================================
 # Clean targets
@@ -436,6 +436,7 @@ clean: clean-boot clean-kernel
 
 clean-all: clean clean-user clean-fstool
 	rm -rf $(BUILD_DIR)
+	rm -f boot-rom boot-rom.txt block_storage.bin
 
 .PHONY: all clean clean-all clean-boot clean-kernel clean-user clean-fstool \
         fs-image fstool user-programs check-pie compile-for-qemu qemu qemu-gdb
