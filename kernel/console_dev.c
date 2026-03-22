@@ -19,7 +19,11 @@ static int console_read(uint8_t minor, void *buf, uint32_t len) {
         while ((CONSOLE_RCR & 1) == 0) {
             /* busy wait for keyboard input */
         }
-        dst[i++] = (uint8_t)CONSOLE_RDR;
+        uint8_t c = (uint8_t)CONSOLE_RDR;
+        if (c == 0x04) {  /* Ctrl-D: signal EOF */
+            break;        /* Return bytes read so far (0 = EOF) */
+        }
+        dst[i++] = c;
     }
 
     return i;
