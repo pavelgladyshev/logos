@@ -67,17 +67,12 @@ int getchar(void)
 
 char *gets(char *buf, int size)
 {
-    int i = 0;
-    int c;
-
-    /* Console driver handles echo and backspace */
-    while (i < size - 1) {
-        c = getchar();
-        if (c < 0) break;        /* EOF (Ctrl-D) or error */
-        if (c == '\n') break;     /* Line complete (driver echoed it) */
-        buf[i++] = c;
-    }
-    buf[i] = '\0';
+    /* Read a full line — console driver handles echo, backspace, Enter */
+    int n = read(STDIN_FILENO, buf, size - 1);
+    if (n < 0) n = 0;
+    /* Strip trailing newline if present */
+    if (n > 0 && buf[n - 1] == '\n') n--;
+    buf[n] = '\0';
     return buf;
 }
 
