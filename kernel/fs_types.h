@@ -68,7 +68,7 @@ struct inode {
     uint8_t  type;             /* File type (FT_FREE, FT_FILE, FT_DIR, FT_CHARDEV) */
     uint8_t  major;            /* Major device number (for FT_CHARDEV) */
     uint8_t  minor;            /* Minor device number (for FT_CHARDEV) */
-    uint8_t  reserved;         /* Padding for alignment */
+    uint8_t  link_count;       /* Number of hard links to this inode */
     uint16_t blocks[DIRECT_BLOCKS];  /* Direct block pointers (16-bit indices) */
 };
 
@@ -91,5 +91,17 @@ struct dirent {
 /* Size: 4 + 28 = 32 bytes per directory entry */
 #define DIRENT_SIZE        sizeof(struct dirent)
 #define DIRENTS_PER_BLOCK  (BLOCK_SIZE / DIRENT_SIZE)
+
+/*
+ * Stat information returned by sys_stat
+ */
+struct stat_info {
+    uint32_t ino;              /* Inode number */
+    uint32_t size;             /* File size in bytes */
+    uint8_t  type;             /* File type (FT_FILE, FT_DIR, FT_CHARDEV) */
+    uint8_t  link_count;       /* Number of hard links */
+    uint8_t  major;            /* Major device number */
+    uint8_t  minor;            /* Minor device number */
+};
 
 #endif /* FS_TYPES_H */

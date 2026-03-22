@@ -126,7 +126,7 @@ static void cmd_echo(int argc, char *argv[])
     int i;
     for (i = 1; i < argc; i++) {
         if (i > 1) putchar(' ');
-        puts(argv[i]);
+        write(STDOUT_FILENO, argv[i], strlen(argv[i]));
     }
     putchar('\n');
 }
@@ -160,7 +160,6 @@ static void cmd_set(int argc, char *argv[])
         for (i = 0; i < count; i++) {
             getenv_entry(i, buf, sizeof(buf));
             puts(buf);
-            putchar('\n');
         }
         return;
     }

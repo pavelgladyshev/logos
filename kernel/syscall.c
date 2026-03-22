@@ -798,6 +798,165 @@ static int32_t sys_getenv_entry(trap_frame_t *tf) {
  *
  * Note: sys_spawn and sys_exit may call trap_ret() directly and never return.
  */
+/*
+ * sys_unlink - Delete a file
+ * a0 = path
+ * Returns: 0 on success, negative error
+ */
+static int32_t sys_unlink(trap_frame_t *tf) {
+    const char *path = (const char *)tf->a0;
+    char resolved[MAX_ARG_LEN];
+    uint32_t parent_ino;
+    const char *name;
+
+    if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
+        return FS_ERR_INVALID;
+    }
+
+    int result = resolve_parent(resolved, &parent_ino, &name);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    return file_delete(parent_ino, name);
+}
+
+/*
+ * sys_link - Create a hard link
+ * a0 = target path (existing file), a1 = link path (new name)
+ * Returns: 0 on success, negative error
+ */
+static int32_t sys_link(trap_frame_t *tf) {
+    const char *target = (const char *)tf->a0;
+    const char *linkpath = (const char *)tf->a1;
+    char resolved_target[MAX_ARG_LEN];
+    char resolved_link[MAX_ARG_LEN];
+    uint32_t target_ino;
+    uint32_t link_parent_ino;
+    const char *link_name;
+    struct inode in;
+
+    if (resolve_path(target, resolved_target, MAX_ARG_LEN) < 0) {
+        return FS_ERR_INVALID;
+    }
+    int result = fs_open(resolved_target, &target_ino);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    if (inode_read(target_ino, &in) != FS_OK) {
+        return FS_ERR_IO;
+    }
+    if (in.type != FT_FILE) {
+        return FS_ERR_INVALID;
+    }
+
+    if (resolve_path(linkpath, resolved_link, MAX_ARG_LEN) < 0) {
+        return FS_ERR_INVALID;
+    }
+    result = resolve_parent(resolved_link, &link_parent_ino, &link_name);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    result = dir_add(link_parent_ino, link_name, target_ino);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    in.link_count++;
+    return inode_write(target_ino, &in);
+}
+
+/*
+ * sys_rename - Rename/move a file or directory
+ * a0 = old path, a1 = new path
+ * Returns: 0 on success, negative error
+ */
+static int32_t sys_rename(trap_frame_t *tf) {
+    const char *oldpath = (const char *)tf->a0;
+    const char *newpath = (const char *)tf->a1;
+    char resolved_old[MAX_ARG_LEN];
+    char resolved_new[MAX_ARG_LEN];
+    uint32_t old_parent_ino, new_parent_ino;
+    const char *old_name, *new_name;
+    uint32_t file_ino;
+
+    if (resolve_path(oldpath, resolved_old, MAX_ARG_LEN) < 0) {
+        return FS_ERR_INVALID;
+    }
+    int result = resolve_parent(resolved_old, &old_parent_ino, &old_name);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    result = dir_lookup(old_parent_ino, old_name, &file_ino);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    if (resolve_path(newpath, resolved_new, MAX_ARG_LEN) < 0) {
+        return FS_ERR_INVALID;
+    }
+    result = resolve_parent(resolved_new, &new_parent_ino, &new_name);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    result = dir_add(new_parent_ino, new_name, file_ino);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    result = dir_remove(old_parent_ino, old_name);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    /* If directory, update ".." to point to new parent */
+    struct inode in;
+    if (inode_read(file_ino, &in) == FS_OK && in.type == FT_DIR) {
+        dir_remove(file_ino, "..");
+        dir_add(file_ino, "..", new_parent_ino);
+    }
+
+    return FS_OK;
+}
+
+/*
+ * sys_stat - Get file metadata
+ * a0 = path, a1 = pointer to struct stat_info
+ * Returns: 0 on success, negative error
+ */
+static int32_t sys_stat(trap_frame_t *tf) {
+    const char *path = (const char *)tf->a0;
+    struct stat_info *si = (struct stat_info *)tf->a1;
+    char resolved[MAX_ARG_LEN];
+    uint32_t ino;
+    struct inode in;
+
+    if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
+        return FS_ERR_INVALID;
+    }
+
+    int result = fs_open(resolved, &ino);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    if (inode_read(ino, &in) != FS_OK) {
+        return FS_ERR_IO;
+    }
+
+    si->ino = ino;
+    si->size = in.size;
+    si->type = in.type;
+    si->link_count = in.link_count;
+    si->major = in.major;
+    si->minor = in.minor;
+    return FS_OK;
+}
+
 int syscall_dispatch(trap_frame_t *tf) {
     uint32_t syscall_num = tf->a7;
     int32_t result = 0;
@@ -870,6 +1029,22 @@ int syscall_dispatch(trap_frame_t *tf) {
 
         case SYS_chdir:
             result = sys_chdir(tf);
+            break;
+
+        case SYS_unlink:
+            result = sys_unlink(tf);
+            break;
+
+        case SYS_link:
+            result = sys_link(tf);
+            break;
+
+        case SYS_rename:
+            result = sys_rename(tf);
+            break;
+
+        case SYS_stat:
+            result = sys_stat(tf);
             break;
 
         default:

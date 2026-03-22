@@ -19,7 +19,13 @@ typedef int ssize_t;
 #define STDERR_FILENO 2
 
 /* Open flags (simplified) */
-#define O_RDONLY 0
+/* Open flags */
+#define O_RDONLY  0
+#define O_WRONLY  1
+#define O_RDWR    2
+#define O_CREAT   0x100
+#define O_TRUNC   0x200
+#define O_APPEND  0x400
 
 /*
  * System call wrappers
@@ -88,6 +94,28 @@ int rmdir(const char *path);
 /* Create a device node */
 int mknod(const char *path, int major, int minor);
 
+/* Delete a file */
+int unlink(const char *path);
+
+/* Create a hard link (new name for existing file) */
+int link(const char *target, const char *linkpath);
+
+/* Rename/move a file or directory */
+int rename(const char *oldpath, const char *newpath);
+
+/* File metadata (matches kernel's struct stat_info) */
+struct stat_info {
+    unsigned int ino;            /* Inode number */
+    unsigned int size;           /* File size in bytes */
+    unsigned char type;          /* File type */
+    unsigned char link_count;    /* Number of hard links */
+    unsigned char major;         /* Major device number */
+    unsigned char minor;         /* Minor device number */
+};
+
+/* Get file metadata */
+int stat(const char *path, struct stat_info *si);
+
 /*
  * Environment variables
  *
@@ -130,7 +158,7 @@ int env_to_envp(char *envp[]);
 /* Write a single character to stdout */
 int putchar(int c);
 
-/* Write a string to stdout (no newline added) */
+/* Write a string followed by newline to stdout (C standard) */
 int puts(const char *s);
 
 /* Formatted output to stdout */

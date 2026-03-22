@@ -51,6 +51,7 @@ int inode_alloc(void) {
         if (in.type == FT_FREE) {
             /* Found free inode */
             memset(&in, 0, INODE_SIZE);
+            in.link_count = 1;
             if (inode_write(i, &in) != FS_OK) {
                 return FS_ERR_IO;
             }

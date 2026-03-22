@@ -187,13 +187,58 @@ cat.elf: $(CAT_OBJS)
 	$(RISCV_TOOL_PREFIX)nm cat-debug.elf > cat.sym
 	$(RISCV_TOOL_PREFIX)strip -s cat-debug.elf -o cat.elf
 
-user-programs: hello.elf spawn_demo.elf shell.elf ls.elf mkdir.elf rmdir.elf mknod.elf env_demo.elf cat.elf
+# Rm program
+RM_OBJS = $(USER_COMMON_OBJS) user/rm.user.o
+
+rm.elf: $(RM_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o rm-debug.elf -T $(USER_LINKER_SCRIPT) $(RM_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S rm-debug.elf > rm.asm
+	$(RISCV_TOOL_PREFIX)nm rm-debug.elf > rm.sym
+	$(RISCV_TOOL_PREFIX)strip -s rm-debug.elf -o rm.elf
+
+# Mv program
+MV_OBJS = $(USER_COMMON_OBJS) user/mv.user.o
+
+mv.elf: $(MV_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o mv-debug.elf -T $(USER_LINKER_SCRIPT) $(MV_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S mv-debug.elf > mv.asm
+	$(RISCV_TOOL_PREFIX)nm mv-debug.elf > mv.sym
+	$(RISCV_TOOL_PREFIX)strip -s mv-debug.elf -o mv.elf
+
+# Ln program
+LN_OBJS = $(USER_COMMON_OBJS) user/ln.user.o
+
+ln.elf: $(LN_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o ln-debug.elf -T $(USER_LINKER_SCRIPT) $(LN_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S ln-debug.elf > ln.asm
+	$(RISCV_TOOL_PREFIX)nm ln-debug.elf > ln.sym
+	$(RISCV_TOOL_PREFIX)strip -s ln-debug.elf -o ln.elf
+
+# Cp program
+CP_OBJS = $(USER_COMMON_OBJS) user/cp.user.o
+
+cp.elf: $(CP_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o cp-debug.elf -T $(USER_LINKER_SCRIPT) $(CP_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S cp-debug.elf > cp.asm
+	$(RISCV_TOOL_PREFIX)nm cp-debug.elf > cp.sym
+	$(RISCV_TOOL_PREFIX)strip -s cp-debug.elf -o cp.elf
+
+# Ed program (line editor)
+ED_OBJS = $(USER_COMMON_OBJS) user/ed.user.o
+
+ed.elf: $(ED_OBJS)
+	$(RISCV_TOOL_PREFIX)ld -nostdlib -o ed-debug.elf -T $(USER_LINKER_SCRIPT) $(ED_OBJS)
+	$(RISCV_TOOL_PREFIX)objdump -S ed-debug.elf > ed.asm
+	$(RISCV_TOOL_PREFIX)nm ed-debug.elf > ed.sym
+	$(RISCV_TOOL_PREFIX)strip -s ed-debug.elf -o ed.elf
+
+user-programs: hello.elf spawn_demo.elf shell.elf ls.elf mkdir.elf rmdir.elf mknod.elf env_demo.elf cat.elf rm.elf mv.elf ln.elf cp.elf ed.elf
 
 # Check user programs for PIE compatibility
-check-pie: $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS)
+check-pie: $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS) $(RM_OBJS) $(MV_OBJS) $(LN_OBJS) $(CP_OBJS) $(ED_OBJS)
 	@echo "=== Checking user program object files for PIE compatibility ==="
 	@FAILED=0; \
-	for obj in $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS); do \
+	for obj in $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS) $(RM_OBJS) $(MV_OBJS) $(LN_OBJS) $(CP_OBJS) $(ED_OBJS); do \
 		if ! ./check_pie.sh $$obj > /dev/null 2>&1; then \
 			./check_pie.sh $$obj; \
 			FAILED=1; \
@@ -233,8 +278,8 @@ $(FSTOOL_BIN): $(FSTOOL_OBJS)
 # Filesystem image
 # ====================================
 
-fs-image: $(FSTOOL_BIN) kernel.bin hello.elf spawn_demo.elf shell.elf ls.elf mkdir.elf rmdir.elf mknod.elf env_demo.elf cat.elf
-	$(FSTOOL_BIN) format block_storage.bin 256
+fs-image: $(FSTOOL_BIN) kernel.bin hello.elf spawn_demo.elf shell.elf ls.elf mkdir.elf rmdir.elf mknod.elf env_demo.elf cat.elf rm.elf mv.elf ln.elf cp.elf ed.elf
+	$(FSTOOL_BIN) format block_storage.bin 512
 	$(FSTOOL_BIN) mkdir block_storage.bin /boot
 	$(FSTOOL_BIN) mkdir block_storage.bin /bin
 	$(FSTOOL_BIN) mkdir block_storage.bin /etc
@@ -248,6 +293,11 @@ fs-image: $(FSTOOL_BIN) kernel.bin hello.elf spawn_demo.elf shell.elf ls.elf mkd
 	$(FSTOOL_BIN) add block_storage.bin /bin/mknod mknod.elf
 	$(FSTOOL_BIN) add block_storage.bin /bin/env_demo env_demo.elf
 	$(FSTOOL_BIN) add block_storage.bin /bin/cat cat.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/rm rm.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/mv mv.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/ln ln.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/cp cp.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/ed ed.elf
 	$(FSTOOL_BIN) add block_storage.bin /etc/hello.txt hello.txt
 	@echo "Filesystem image created."
 
@@ -293,7 +343,7 @@ clean-kernel:
 	rm -f $(KERNEL_OBJS) kernel-debug.elf kernel.bin kernel.map kernel.sym kernel.asm
 
 clean-user:
-	rm -f $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS)
+	rm -f $(HELLO_OBJS) $(SPAWN_DEMO_OBJS) $(SHELL_OBJS) $(LS_OBJS) $(MKDIR_OBJS) $(RMDIR_OBJS) $(MKNOD_OBJS) $(ENV_DEMO_OBJS) $(RM_OBJS) $(MV_OBJS) $(LN_OBJS) $(CP_OBJS) $(ED_OBJS)
 	rm -f hello.elf hello-debug.elf hello.asm hello.sym
 	rm -f spawn_demo.elf spawn_demo-debug.elf spawn_demo.asm spawn_demo.sym
 	rm -f shell.elf shell-debug.elf shell.asm shell.sym
@@ -303,6 +353,11 @@ clean-user:
 	rm -f mknod.elf mknod-debug.elf mknod.asm mknod.sym
 	rm -f env_demo.elf env_demo-debug.elf env_demo.asm env_demo.sym
 	rm -f cat.elf cat-debug.elf cat.asm cat.sym
+	rm -f rm.elf rm-debug.elf rm.asm rm.sym
+	rm -f mv.elf mv-debug.elf mv.asm mv.sym
+	rm -f ln.elf ln-debug.elf ln.asm ln.sym
+	rm -f cp.elf cp-debug.elf cp.asm cp.sym
+	rm -f ed.elf ed-debug.elf ed.asm ed.sym
 
 clean-fstool:
 	rm -f $(FSTOOL_OBJS) $(FSTOOL_BIN)

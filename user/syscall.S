@@ -173,3 +173,43 @@ chdir:
     ret
 
     .size chdir, .-chdir
+
+/* int unlink(const char *path) */
+    .globl unlink
+    .type unlink, @function
+unlink:
+    li   a7, SYS_unlink
+    ecall
+    ret
+
+    .size unlink, .-unlink
+
+/* int link(const char *target, const char *linkpath) */
+    .globl link
+    .type link, @function
+link:
+    li   a7, SYS_link
+    ecall
+    ret
+
+    .size link, .-link
+
+/* int rename(const char *oldpath, const char *newpath) */
+    .globl rename
+    .type rename, @function
+rename:
+    li   a7, SYS_rename
+    ecall
+    ret
+
+    .size rename, .-rename
+
+/* int stat(const char *path, struct stat_info *si) */
+    .globl stat
+    .type stat, @function
+stat:
+    li   a7, SYS_stat
+    ecall
+    ret
+
+    .size stat, .-stat
