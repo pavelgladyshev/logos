@@ -91,7 +91,7 @@ BAR_H = 50
 # Give metadata blocks readable widths, data fills the rest
 SB_W  = 100   # superblock
 BM_W  = 80    # bitmap
-IN_W  = 160   # inode table (8 blocks)
+IN_W  = 160   # inode table (16 blocks)
 DA_W  = BAR_W - SB_W - BM_W - IN_W  # data blocks
 
 # Detail sections
@@ -105,20 +105,20 @@ detail_sections = [
         "colour": SUPERBLOCK,
         "fields": [
             ("magic",         "uint32",    '0x53465346 ("FSFS")'),
-            ("total_blocks",  "uint32",    "512"),
-            ("total_inodes",  "uint32",    "32"),
+            ("total_blocks",  "uint32",    "1024"),
+            ("total_inodes",  "uint32",    "64"),
             ("free_blocks",   "uint32",    "count of free data blocks"),
             ("free_inodes",   "uint32",    "count of free inodes"),
             ("bitmap_start",  "uint32",    "1"),
-            ("bitmap_blocks", "uint32",    "1"),
-            ("inode_start",   "uint32",    "2"),
-            ("inode_blocks",  "uint32",    "8"),
-            ("data_start",    "uint32",    "10"),
+            ("bitmap_blocks", "uint32",    "2"),
+            ("inode_start",   "uint32",    "3"),
+            ("inode_blocks",  "uint32",    "16"),
+            ("data_start",    "uint32",    "19"),
             ("reserved",      "byte[472]", "padding to fill 512-byte block"),
         ],
     },
     {
-        "title": "Inode (128 bytes \u2014 4 per block, 32 total)",
+        "title": "Inode (128 bytes \u2014 4 per block, 64 total)",
         "colour": INODE,
         "fields": [
             ("size",        "uint32",     "file size in bytes"),
@@ -154,7 +154,7 @@ d = ImageDraw.Draw(img)
 y = MARGIN_T
 
 # --- Title ---
-title = "logOS Filesystem Disk Layout  (512 \u00d7 512 = 256 KB)"
+title = "logOS Filesystem Disk Layout  (1024 \u00d7 512 = 512 KB)"
 tw = text_w(d, title, F_TITLE)
 d.text(((W - tw) // 2, y), title, fill=TEXT, font=F_TITLE)
 y += 28 + 14
@@ -164,18 +164,18 @@ bar_x = MARGIN_L
 bar_y = y
 
 draw_block_rect(d, bar_x,                     bar_y, SB_W, BAR_H, SUPERBLOCK, "Superblock", "Block 0")
-draw_block_rect(d, bar_x + SB_W,              bar_y, BM_W, BAR_H, BITMAP,     "Bitmap",     "Block 1")
-draw_block_rect(d, bar_x + SB_W + BM_W,       bar_y, IN_W, BAR_H, INODE,      "Inode Table","Blocks 2\u20139")
-draw_block_rect(d, bar_x + SB_W + BM_W + IN_W,bar_y, DA_W, BAR_H, DATA,       "Data Blocks","Blocks 10\u2013511")
+draw_block_rect(d, bar_x + SB_W,              bar_y, BM_W, BAR_H, BITMAP,     "Bitmap",     "Blocks 1\u20132")
+draw_block_rect(d, bar_x + SB_W + BM_W,       bar_y, IN_W, BAR_H, INODE,      "Inode Table","Blocks 3\u201318")
+draw_block_rect(d, bar_x + SB_W + BM_W + IN_W,bar_y, DA_W, BAR_H, DATA,       "Data Blocks","Blocks 19\u20131023")
 
 # --- Block numbers below the bar ---
 num_y = bar_y + BAR_H + 4
 d.text((bar_x + 1, num_y), "0", fill=GREY, font=F_MONO_S)
 d.text((bar_x + SB_W + 1, num_y), "1", fill=GREY, font=F_MONO_S)
-d.text((bar_x + SB_W + BM_W + 1, num_y), "2", fill=GREY, font=F_MONO_S)
-d.text((bar_x + SB_W + BM_W + IN_W + 1, num_y), "10", fill=GREY, font=F_MONO_S)
-t255 = "511"
-d.text((bar_x + BAR_W - text_w(d, t255, F_MONO_S) - 2, num_y), t255, fill=GREY, font=F_MONO_S)
+d.text((bar_x + SB_W + BM_W + 1, num_y), "3", fill=GREY, font=F_MONO_S)
+d.text((bar_x + SB_W + BM_W + IN_W + 1, num_y), "19", fill=GREY, font=F_MONO_S)
+t1023 = "1023"
+d.text((bar_x + BAR_W - text_w(d, t1023, F_MONO_S) - 2, num_y), t1023, fill=GREY, font=F_MONO_S)
 
 # --- Sizes below block numbers ---
 sz_y = num_y + 16
@@ -185,9 +185,9 @@ def sz_center(offset, width, txt):
     d.text((cx - tw // 2, sz_y), txt, fill=GREY, font=F_MONO_S)
 
 sz_center(0,                     SB_W, "512 B")
-sz_center(SB_W,                  BM_W, "512 B")
-sz_center(SB_W + BM_W,          IN_W, "4 KB")
-sz_center(SB_W + BM_W + IN_W,   DA_W, "251 KB")
+sz_center(SB_W,                  BM_W, "1 KB")
+sz_center(SB_W + BM_W,          IN_W, "8 KB")
+sz_center(SB_W + BM_W + IN_W,   DA_W, "~502 KB")
 
 y = sz_y + 18 + 8
 
