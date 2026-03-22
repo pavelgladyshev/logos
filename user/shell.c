@@ -126,7 +126,7 @@ static int parse_redirections(int argc, char *argv[],
                               char *redir_out, int *redir_out_mode,
                               char *redir_in, int *has_redir_in)
 {
-    int i, j;
+    int i;
     int new_argc = 0;
 
     redir_out[0] = '\0';
@@ -137,30 +137,32 @@ static int parse_redirections(int argc, char *argv[],
     i = 0;
     while (i < argc) {
         /* Check for >> (must check before >) */
-        if (strcmp(argv[i], ">>") == 0) {
+        if (argv[i][0] == '>' && argv[i][1] == '>' && argv[i][2] == '\0') {
             if (i + 1 < argc) {
-                strcpy(redir_out, argv[i + 1]);
+                strncpy(redir_out, argv[i + 1], MAX_PATH_LEN - 1);
+                redir_out[MAX_PATH_LEN - 1] = '\0';
                 *redir_out_mode = REDIR_APPEND;
-                i += 2;  /* skip >> and filename */
+                i += 2;
                 continue;
             }
-            /* >> with no filename — treat as regular arg */
         }
         /* Check for > */
-        else if (strcmp(argv[i], ">") == 0) {
+        else if (argv[i][0] == '>' && argv[i][1] == '\0') {
             if (i + 1 < argc) {
-                strcpy(redir_out, argv[i + 1]);
+                strncpy(redir_out, argv[i + 1], MAX_PATH_LEN - 1);
+                redir_out[MAX_PATH_LEN - 1] = '\0';
                 *redir_out_mode = REDIR_TRUNC;
-                i += 2;  /* skip > and filename */
+                i += 2;
                 continue;
             }
         }
         /* Check for < */
-        else if (strcmp(argv[i], "<") == 0) {
+        else if (argv[i][0] == '<' && argv[i][1] == '\0') {
             if (i + 1 < argc) {
-                strcpy(redir_in, argv[i + 1]);
+                strncpy(redir_in, argv[i + 1], MAX_PATH_LEN - 1);
+                redir_in[MAX_PATH_LEN - 1] = '\0';
                 *has_redir_in = 1;
-                i += 2;  /* skip < and filename */
+                i += 2;
                 continue;
             }
         }
@@ -408,8 +410,7 @@ static void run_external(int argc, char *argv[],
  * Each stage can have its own < or > redirections.
  * Parent waits for all children.
  */
-static void run_multi_pipeline(int n_stages,
-                                int argc_s[], char **argv_s[],
+static void run_multi_pipeline(int n_stages, char **argv_s[],
                                 char rout_s[][MAX_PATH_LEN],
                                 int rout_mode_s[],
                                 char rin_s[][MAX_PATH_LEN],
@@ -462,7 +463,6 @@ static void run_multi_pipeline(int n_stages,
                 exit(1);
             }
 
-            (void)argc_s[i];
             exec_with_path(argv_s[i]);
             exit(127);
         }
@@ -490,18 +490,6 @@ static void run_multi_pipeline(int n_stages,
         wait();
 }
 
-/*
- * Check if a command name is a built-in that should NOT be run through
- * a pipeline (needs to affect the shell's own state).
- */
-static int is_state_builtin(const char *cmd)
-{
-    if (strcmp(cmd, "cd") == 0) return 1;
-    if (strcmp(cmd, "set") == 0) return 1;
-    if (strcmp(cmd, "unset") == 0) return 1;
-    if (strcmp(cmd, "exit") == 0) return 1;
-    return 0;
-}
 
 int main(int argc, char *argv[])
 {
@@ -543,7 +531,6 @@ int main(int argc, char *argv[])
             char seg_rin[MAX_PIPE_STAGES][MAX_PATH_LEN];
             int seg_rout_mode[MAX_PIPE_STAGES];
             int seg_has_rin[MAX_PIPE_STAGES];
-            char *argv_ptrs[MAX_PIPE_STAGES];  /* for passing to run_multi_pipeline */
             int n_stages = 0;
             int ok = 1;
 
@@ -595,7 +582,7 @@ int main(int argc, char *argv[])
                 char **argv_arr[MAX_PIPE_STAGES];
                 for (s = 0; s < n_stages; s++)
                     argv_arr[s] = seg_argv[s];
-                run_multi_pipeline(n_stages, seg_argc, argv_arr,
+                run_multi_pipeline(n_stages, argv_arr,
                                    seg_rout, seg_rout_mode,
                                    seg_rin, seg_has_rin);
             }
@@ -618,12 +605,8 @@ int main(int argc, char *argv[])
         } else if (strcmp(cmd_argv[0], "exit") == 0) {
             int code = 0;
             if (cmd_argc > 1) {
-                /* Parse exit code - simple atoi */
-                char *p = cmd_argv[1];
-                while (*p >= '0' && *p <= '9') {
-                    code = code * 10 + (*p - '0');
-                    p++;
-                }
+                int parsed = atoi(cmd_argv[1]);
+                if (parsed >= 0) code = parsed;
             }
             exit(code);
         } else if (strcmp(cmd_argv[0], "echo") == 0) {

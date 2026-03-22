@@ -12,19 +12,7 @@
  */
 
 #include "libc.h"
-
-static int tests_passed = 0;
-static int tests_failed = 0;
-
-static void pass(const char *name) {
-    printf("  PASS: %s\n", name);
-    tests_passed++;
-}
-
-static void fail(const char *name, const char *detail) {
-    printf("  FAIL: %s - %s\n", name, detail);
-    tests_failed++;
-}
+#include "test_helpers.h"
 
 /*
  * Test 1: Capture child stdout via pipe
@@ -329,9 +317,7 @@ int main(void)
     test_fork_preserves_pipe();
     test_exec_preserves_pipe();
 
-    printf("\n========================================\n");
-    printf("Results: %d passed, %d failed\n", tests_passed, tests_failed);
-    printf("========================================\n");
+    print_test_results();
 
     return tests_failed;
 }

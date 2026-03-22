@@ -249,6 +249,9 @@ int strncmp(const char *s1, const char *s2, size_t n);
 /* Find first occurrence of character in string */
 char *strchr(const char *s, int c);
 
+/* Convert string to non-negative integer. Returns -1 on error. */
+int atoi(const char *s);
+
 /*
  * Memory functions (pure user-space, no syscalls)
  */

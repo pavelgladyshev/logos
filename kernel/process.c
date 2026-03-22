@@ -52,10 +52,9 @@ int proc_alloc(void) {
     return -1;
 }
 
-void proc_free(int slot) {
+/* Close all pipe fds in a slot, decrementing refcounts */
+static void proc_close_pipes(int slot) {
     int i;
-
-    /* Close any open pipe fds to decrement refcounts */
     for (i = 0; i < MAX_FD; i++) {
         if (proc_table[slot].fds[i].in_use &&
             proc_table[slot].fds[i].type == FT_PIPE) {
@@ -64,6 +63,10 @@ void proc_free(int slot) {
             proc_table[slot].fds[i].in_use = 0;
         }
     }
+}
+
+void proc_free(int slot) {
+    proc_close_pipes(slot);
 
     proc_table[slot].state = PROC_FREE;
     proc_table[slot].pid = 0;
@@ -76,17 +79,7 @@ void proc_fd_init(int slot) {
     struct process *p = &proc_table[slot];
     int i;
 
-    /* Close any open pipe fds first to decrement refcounts */
-    for (i = 0; i < MAX_FD; i++) {
-        if (p->fds[i].in_use && p->fds[i].type == FT_PIPE) {
-            pipe_close_fd((int)p->fds[i].inode, (int)p->fds[i].minor);
-        }
-    }
-
-    /* Clear all file descriptors */
-    for (i = 0; i < MAX_FD; i++) {
-        p->fds[i].in_use = 0;
-    }
+    proc_close_pipes(slot);
 
     /* fd 0 = stdin, fd 1 = stdout, fd 2 = stderr -> console device */
     for (i = 0; i < 3; i++) {

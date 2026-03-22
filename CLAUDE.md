@@ -69,6 +69,7 @@ Key modules organized by directory:
 | **User** (`user/`) | | |
 | User Runtime | `user_crt0.S`, `user.lds` | User program startup, linker script |
 | User Library | `libc.c/h`, `syscall.S` | User-space libc with syscall wrappers |
+| Test Helpers | `test_helpers.h` | Shared pass/fail/results helpers for test programs |
 | Shell | `shell.c` | Interactive shell (`/bin/sh`) |
 | **Host Tools** | | |
 | Host Tool | `fstool.c`, `native_block.c` | Native utility to manage filesystem images |
@@ -244,7 +245,7 @@ The user library provides:
 - **Directory operations**: `readdir()`, `mkdir()`, `rmdir()`, `mknod()`
 - **Process control**: `exit()`, `fork()`, `exec()`, `execve()`, `wait()`, `getpid()`, `spawn()`, `spawnve()`, `chdir()`, `kill()`, `ps()`
 - **Environment**: `setenv()`, `unsetenv()`, `env_count()`, `getenv()`, `getenv_r()`, `getenv_entry()`, `env_to_envp()`
-- **String functions**: `strlen()`, `strcmp()`, `strncmp()`, `strcpy()`, `strncpy()`, `strchr()`
+- **String functions**: `strlen()`, `strcmp()`, `strncmp()`, `strcpy()`, `strncpy()`, `strchr()`, `atoi()`
 - **Memory functions**: `memset()`, `memcpy()`, `memcmp()`
 
 Build produces user programs that are added to the filesystem image:

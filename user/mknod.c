@@ -8,26 +8,6 @@
 
 #include "libc.h"
 
-/*
- * Simple string-to-integer conversion.
- * Returns the parsed non-negative integer, or -1 on error.
- */
-static int atoi(const char *s) {
-    int n = 0;
-
-    if (*s == '\0') return -1;
-
-    while (*s >= '0' && *s <= '9') {
-        n = n * 10 + (*s - '0');
-        s++;
-    }
-
-    /* If we stopped on a non-NUL character, the string wasn't all digits */
-    if (*s != '\0') return -1;
-
-    return n;
-}
-
 int main(int argc, char *argv[]) {
     int major, minor, result;
 

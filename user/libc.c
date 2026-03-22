@@ -289,6 +289,23 @@ void *memcpy(void *dest, const void *src, size_t n)
     return dest;
 }
 
+int atoi(const char *s)
+{
+    int n = 0;
+
+    if (*s == '\0') return -1;
+
+    while (*s >= '0' && *s <= '9') {
+        n = n * 10 + (*s - '0');
+        s++;
+    }
+
+    /* If we stopped on a non-NUL character, the string wasn't all digits */
+    if (*s != '\0') return -1;
+
+    return n;
+}
+
 int memcmp(const void *s1, const void *s2, size_t n)
 {
     const unsigned char *p1 = (const unsigned char *)s1;

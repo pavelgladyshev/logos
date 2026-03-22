@@ -752,23 +752,17 @@ static int32_t sys_wait(trap_frame_t *tf) {
     int has_children = 0;
     (void)tf;
 
-    /* First pass: look for zombie children */
+    /* Single pass: collect zombie or check for living children */
     for (i = 0; i < MAX_PROCS; i++) {
-        if (proc_table[i].parent == current_proc &&
-            proc_table[i].state == PROC_ZOMBIE) {
-            /* Found a zombie child — collect exit code and free */
+        if (proc_table[i].parent != current_proc)
+            continue;
+        if (proc_table[i].state == PROC_ZOMBIE) {
             int exit_code = proc_table[i].exit_code;
             proc_free(i);
             return exit_code;
         }
-    }
-
-    /* Second pass: check for any living children */
-    for (i = 0; i < MAX_PROCS; i++) {
-        if (proc_table[i].parent == current_proc &&
-            proc_table[i].state != PROC_FREE) {
+        if (proc_table[i].state != PROC_FREE) {
             has_children = 1;
-            break;
         }
     }
 

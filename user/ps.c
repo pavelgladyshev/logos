@@ -9,6 +9,12 @@
 
 #define MAX_PROCS 8
 
+/* Process states (must match kernel/process.h) */
+#define PROC_RUNNING  1
+#define PROC_READY    2
+#define PROC_SLEEPING 3
+#define PROC_ZOMBIE   4
+
 int main(void)
 {
     struct proc_info procs[MAX_PROCS];
@@ -24,10 +30,10 @@ int main(void)
     for (i = 0; i < count; i++) {
         char *state;
         int s = procs[i].state;
-        if (s == 1) state = "ready";
-        else if (s == 2) state = "running";
-        else if (s == 3) state = "sleeping";
-        else if (s == 4) state = "zombie";
+        if (s == PROC_RUNNING) state = "running";
+        else if (s == PROC_READY) state = "ready";
+        else if (s == PROC_SLEEPING) state = "sleeping";
+        else if (s == PROC_ZOMBIE) state = "zombie";
         else state = "?";
 
         printf("%-4d %-8s %d\n", procs[i].pid, state, procs[i].parent);

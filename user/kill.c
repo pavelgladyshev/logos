@@ -9,18 +9,17 @@
 
 int main(int argc, char *argv[])
 {
-    int pid = 0;
-    char *p;
+    int pid;
 
     if (argc != 2) {
         puts("usage: kill <pid>");
         return 1;
     }
 
-    p = argv[1];
-    while (*p >= '0' && *p <= '9') {
-        pid = pid * 10 + (*p - '0');
-        p++;
+    pid = atoi(argv[1]);
+    if (pid < 0) {
+        puts("kill: invalid pid");
+        return 1;
     }
 
     if (kill(pid) < 0) {
