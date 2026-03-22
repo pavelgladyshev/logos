@@ -1,19 +1,18 @@
 # Build artifacts - object files
 *.o
 
-# Build artifacts - binaries and debug ELFs
+# Build output directory
+build/
+
+# Legacy build artifacts (in case of old builds)
 *.elf
 *.bin
 *.asm
 *.sym
 *.map
-
-# Bootloader build outputs
 bootloader
 boot-rom
 boot-rom.txt
-
-# Filesystem image
 block_storage.bin
 
 # fstool binary
