@@ -94,91 +94,101 @@ char *gets(char *buf, int size)
     return buf;
 }
 
-/* Helper: print unsigned integer */
-static void put_uint(unsigned int n)
+/* Helper: format unsigned int into buffer, return length */
+static int fmt_uint(unsigned int n, char *buf, int bufsz)
 {
-    char buf[12];
     int i = 0;
-
-    if (n == 0) {
-        putchar('0');
-        return;
-    }
-
-    while (n > 0) {
-        buf[i++] = '0' + (n % 10);
-        n /= 10;
-    }
-
-    while (i > 0) {
-        putchar(buf[--i]);
-    }
+    char tmp[12];
+    if (n == 0) { tmp[i++] = '0'; }
+    else { while (n > 0) { tmp[i++] = '0' + (n % 10); n /= 10; } }
+    if (i > bufsz) i = bufsz;
+    int len = i;
+    while (i > 0) *buf++ = tmp[--i];
+    return len;
 }
 
-/* Helper: print signed integer */
-static void put_int(int n)
+/* Helper: format signed int into buffer, return length */
+static int fmt_int(int n, char *buf, int bufsz)
 {
     if (n < 0) {
-        putchar('-');
-        n = -n;
+        *buf = '-';
+        return 1 + fmt_uint((unsigned int)(-n), buf + 1, bufsz - 1);
     }
-    put_uint((unsigned int)n);
+    return fmt_uint((unsigned int)n, buf, bufsz);
 }
 
-/* Helper: print hexadecimal */
-static void put_hex(unsigned int n)
+/* Helper: format hex into buffer, return length */
+static int fmt_hex(unsigned int n, char *buf, int bufsz)
 {
-    int i;
-    int started = 0;
-
+    int i, started = 0, len = 0;
     for (i = 28; i >= 0; i -= 4) {
         int digit = (n >> i) & 0xF;
         if (digit != 0 || started || i == 0) {
-            if (digit < 10) {
-                putchar('0' + digit);
-            } else {
-                putchar('a' + digit - 10);
-            }
+            if (len < bufsz)
+                buf[len++] = (digit < 10) ? ('0' + digit) : ('a' + digit - 10);
             started = 1;
         }
     }
+    return len;
 }
 
-/* Simple printf implementation supporting %s, %d, %u, %x, %c, %% */
+/* Helper: emit a string with optional width and left-justify */
+static int emit_padded(const char *s, int len, int width, int left_justify)
+{
+    int count = 0;
+    int pad = (width > len) ? width - len : 0;
+    if (!left_justify) { for (int i = 0; i < pad; i++) { putchar(' '); count++; } }
+    for (int i = 0; i < len; i++) { putchar(s[i]); count++; }
+    if (left_justify) { for (int i = 0; i < pad; i++) { putchar(' '); count++; } }
+    return count;
+}
+
+/* printf supporting %s, %d, %u, %x, %c, %% with optional width and '-' flag */
 int printf(const char *fmt, ...)
 {
     va_list ap;
     int count = 0;
+    char buf[24];
 
     va_start(ap, fmt);
 
     while (*fmt) {
         if (*fmt == '%') {
             fmt++;
+            /* Parse flags */
+            int left_justify = 0;
+            if (*fmt == '-') { left_justify = 1; fmt++; }
+            /* Parse width */
+            int width = 0;
+            while (*fmt >= '0' && *fmt <= '9') { width = width * 10 + (*fmt - '0'); fmt++; }
+            /* Parse conversion */
             switch (*fmt) {
                 case 's': {
                     const char *s = va_arg(ap, const char*);
-                    while (*s) {
-                        putchar(*s++);
-                        count++;
-                    }
+                    if (!s) s = "(null)";
+                    int len = 0;
+                    while (s[len]) len++;
+                    count += emit_padded(s, len, width, left_justify);
                     break;
                 }
-                case 'd':
-                    put_int(va_arg(ap, int));
-                    count++;  /* Approximate */
+                case 'd': {
+                    int len = fmt_int(va_arg(ap, int), buf, sizeof(buf));
+                    count += emit_padded(buf, len, width, left_justify);
                     break;
-                case 'u':
-                    put_uint(va_arg(ap, unsigned int));
-                    count++;
+                }
+                case 'u': {
+                    int len = fmt_uint(va_arg(ap, unsigned int), buf, sizeof(buf));
+                    count += emit_padded(buf, len, width, left_justify);
                     break;
-                case 'x':
-                    put_hex(va_arg(ap, unsigned int));
-                    count++;
+                }
+                case 'x': {
+                    int len = fmt_hex(va_arg(ap, unsigned int), buf, sizeof(buf));
+                    count += emit_padded(buf, len, width, left_justify);
                     break;
+                }
                 case 'c':
-                    putchar(va_arg(ap, int));
-                    count++;
+                    buf[0] = (char)va_arg(ap, int);
+                    count += emit_padded(buf, 1, width, left_justify);
                     break;
                 case '%':
                     putchar('%');
