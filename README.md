@@ -82,13 +82,13 @@ ROM (64KB)                    RAM
 |  boot_main.c)     |        +-------------------+ 0x0010FFFF
 +-------------------+        +-------------------+ 0x00110000
   0x00000000                 | Process Slot 0    | <- shell
-                              | (64KB)            |
-                              +-------------------+ 0x00120000
+                              | (32KB)            |
+                              +-------------------+ 0x00118000
                               | Process Slot 1    | <- spawned programs
-                              | (64KB)            |
+                              | (32KB)            |
                               +-------------------+
                               | ...               |
-                              +-------------------+ 0x0018FFFF
+                              +-------------------+ 0x0014FFFF
                               | Process Slot 7    |
                               +-------------------+
 
@@ -142,7 +142,7 @@ Programs use `ecall` with the syscall number in `a7` and arguments in `a0`-`a5`:
 
 ### Process Model
 
-- 8 fixed 64KB memory slots, each holding one program
+- 8 fixed 32KB memory slots, each holding one program
 - No preemptive multitasking — one process runs at a time
 - `spawn()` suspends the parent, runs the child in a new slot, and resumes the parent with the child's exit code
 - Per-process file descriptors, environment variables, and working directory

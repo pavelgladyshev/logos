@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A bare-metal Unix-like OS for RISC-V, designed to run on a simulated RISC-V computer (Logisim). Uses a three-stage boot process (bootloader → kernel → shell): a ROM bootloader loads the kernel from the filesystem into RAM, the kernel initializes subsystems and loads the shell, and the shell provides an interactive command-line interface. Implements block-based storage, inode-based file management (max 32 inodes), directory support with path traversal, a character device driver framework, position-independent executable loading, and a system call interface for user programs.
+A bare-metal Unix-like OS for RISC-V, designed to run on a simulated RISC-V computer (Logisim). Uses a three-stage boot process (bootloader → kernel → shell): a ROM bootloader loads the kernel from the filesystem into RAM, the kernel initializes subsystems and loads the shell, and the shell provides an interactive command-line interface. Implements block-based storage, inode-based file management (max 32 inodes), directory support with path traversal, a character device driver framework, position-independent executable loading, preemptive multitasking with fork/exec/wait, kernel-buffered pipes for IPC, and a system call interface for user programs.
 
 ## Build Commands
 
@@ -61,6 +61,7 @@ Key modules organized by directory:
 | Device | `device.c/h`, `console_dev.c/h` | Character device driver framework, console driver |
 | Trap Handling | `trap.S`, `trap.h` | Assembly trap handler, context save/restore |
 | Process Mgmt | `process.c/h` | Process table, slot allocation, per-process state |
+| Pipes | `pipe.c/h` | Kernel-buffered IPC pipes with reference counting |
 | System Calls | `syscall.c/h`, `syscall_nr.h` | Syscall dispatch, per-process file descriptors |
 | ELF Loader | `loader.c/h`, `loader_asm.S`, `elf.h` | Load ELF programs at arbitrary addresses |
 | Kernel Entry | `crt0.S`, `kernel.lds` | Kernel entry point (in RAM), kernel linker script |
@@ -72,7 +73,7 @@ Key modules organized by directory:
 | **Host Tools** | | |
 | Host Tool | `fstool.c`, `native_block.c` | Native utility to manage filesystem images |
 
-**Filesystem Layout (256 blocks × 512 bytes):**
+**Filesystem Layout (512 blocks × 512 bytes):**
 - Block 0: Superblock
 - Blocks 1+: Block allocation bitmap
 - Subsequent blocks: Inode table (32 inodes × 128 bytes)
@@ -81,18 +82,18 @@ Key modules organized by directory:
 **Memory Layout (Logisim):**
 - 0x00000000-0x0000FFFF: ROM (64KB) — bootloader code (`boot_crt0.S` + `boot_main.c`)
 - 0x00100000-0x0010FFFF: RAM — kernel code/data/BSS (loaded by bootloader from `/boot/kernel`)
-- 0x00110000-0x0018FFFF: Process memory slots (8 × 64KB)
-  - Slot 0: 0x00110000-0x0011FFFF (shell)
-  - Slot 1: 0x00120000-0x0012FFFF
+- 0x00110000-0x0014FFFF: Process memory slots (8 × 32KB)
+  - Slot 0: 0x00110000-0x00117FFF (shell)
+  - Slot 1: 0x00118000-0x0011FFFF
   - ...
-  - Slot 7: 0x00180000-0x0018FFFF
+  - Slot 7: 0x00148000-0x0014FFFF
 - 0x001F0000-0x001FEFFF: Bootloader BSS (60KB, used only during boot)
 - 0x001FFFFC: Initial stack pointer (shared by bootloader and kernel)
 - 0x00200000: Block device MMIO
 - 0xFFFF0004/0008: Console input MMIO (receiver control/data)
 - 0xFFFF000C: Console output MMIO
 
-Each 64KB slot holds code + data + BSS + stack (stack grows down from slot top - 0x100).
+Each 32KB slot holds code + data + BSS + stack (stack grows down from slot top - 0x100).
 
 ## Boot Process
 
@@ -157,7 +158,7 @@ User programs communicate with the kernel via the `ecall` instruction. The sysca
 | 0 | sys_exit | a0=status | Terminate program |
 | 1 | sys_read | a0=fd, a1=buf, a2=len | Read from file descriptor |
 | 2 | sys_write | a0=fd, a1=buf, a2=len | Write to file descriptor |
-| 3 | sys_open | a0=path, a1=flags | Open file, return fd (supports relative paths) |
+| 3 | sys_open | a0=path, a1=flags | Open file, return fd; flags: O_RDONLY(0), O_WRONLY(1), O_CREAT(0x100), O_TRUNC(0x200), O_APPEND(0x400) |
 | 4 | sys_close | a0=fd | Close file descriptor |
 | 5 | sys_spawn | a0=path, a1=argv, a2=envp | Launch child in new slot with inherited env; returns child's exit code (envp overrides child's env if non-NULL) |
 | 6 | sys_readdir | a0=path, a1=buf, a2=max | List directory entries |
@@ -170,6 +171,19 @@ User programs communicate with the kernel via the `ecall` instruction. The sysca
 | 13 | sys_getenv_count | (none) | Return number of env variables in current process |
 | 14 | sys_getenv_entry | a0=index, a1=buf, a2=buflen | Get Nth env entry as "KEY=value" from current process |
 | 15 | sys_chdir | a0=path | Change current working directory |
+| 16 | sys_fork | (none) | Fork current process; returns child PID to parent, 0 to child, -1 on error |
+| 17 | sys_exec | a0=path, a1=argv, a2=envp | Replace process image; returns -1 on failure (never returns on success) |
+| 18 | sys_wait | (none) | Wait for any child to exit; returns child's exit code, -1 if no children |
+| 19 | sys_getpid | (none) | Return PID of current process |
+| 20 | sys_dup | a0=oldfd | Duplicate fd; returns lowest available fd, -1 on error |
+| 21 | sys_dup2 | a0=oldfd, a1=newfd | Duplicate fd to specific number; returns newfd, -1 on error |
+| 22 | sys_pipe | a0=pipefd[2] | Create pipe; pipefd[0]=read end, pipefd[1]=write end; returns 0/-1 |
+| 23 | sys_unlink | a0=path | Delete a file (decrements link count, frees inode when 0) |
+| 24 | sys_link | a0=target, a1=linkpath | Create hard link (new directory entry for existing inode) |
+| 25 | sys_rename | a0=oldpath, a1=newpath | Move/rename file or directory |
+| 26 | sys_stat | a0=path, a1=statbuf | Get file metadata (inode, size, type, link_count) |
+| 27 | sys_kill | a0=pid | Terminate a process by PID |
+| 28 | sys_ps | a0=buf, a1=maxprocs | List active processes into struct proc_info array |
 
 **Pre-opened file descriptors:**
 - fd 0: stdin (console device)
@@ -178,22 +192,37 @@ User programs communicate with the kernel via the `ecall` instruction. The sysca
 
 ## Process Model
 
-Each program runs in its own fixed 64KB memory slot with a per-process trap frame, file descriptors, and PID. No preemptive multitasking — only one process runs at a time.
+Each program runs in its own fixed 32KB memory slot with a per-process trap frame, file descriptors, and PID. Preemptive multitasking via timer interrupt (round-robin scheduling).
 
 **Process states:**
 - `PROC_FREE` (0) — slot available
 - `PROC_RUNNING` (1) — currently executing on CPU
-- `PROC_READY` (2) — parent suspended while child runs
+- `PROC_READY` (2) — runnable, waiting for CPU
+- `PROC_SLEEPING` (3) — blocked (waiting for child, I/O, etc.)
+- `PROC_ZOMBIE` (4) — exited, waiting for parent to collect exit code
 
-**spawn() semantics:** `spawn()` loads the child into a **new** process slot (caller's memory is preserved). The parent is suspended (`PROC_READY`) while the child runs. When the child calls `exit()`, the parent resumes with the child's exit code as `spawn()`'s return value. This means `spawn()` returns on both success and failure:
-- **>= 0**: Child ran and exited with this code
-- **< 0**: Loading failed (error code)
+**Sleep reasons** (for PROC_SLEEPING):
+- `SLEEP_NONE` (0) — not sleeping
+- `SLEEP_CHILD` (1) — parent waiting in spawn()
+- `SLEEP_WAIT` (2) — parent waiting in wait()
+- `SLEEP_TIMER` (3) — reserved for future use
+- `SLEEP_IO` (4) — blocked on pipe read/write
 
-**Context switching:** `sys_spawn` and `sys_exit` call `trap_ret()` directly to switch between processes (non-local jump via `mret`). The trap stack is reset on each trap entry, so no stack leak occurs.
+**fork() semantics:** `fork()` copies the parent's entire 32KB memory slot to a new slot, duplicates all file descriptors (incrementing pipe reference counts), copies the environment, and adjusts the child's registers by the memory offset delta. Returns child PID to parent, 0 to child.
 
-**Shell survives spawn:** The shell stays in memory (slot 0) while external commands run in higher slots. Nested spawn is supported (e.g., shell → spawn_demo → hello uses slots 0, 1, 2).
+**exec() semantics:** `exec()` replaces the current process image with a new program. File descriptors are preserved across exec (important for pipe redirection via fork+dup2+exec). Environment is preserved unless envp is non-NULL.
 
-**Environment:** Per-process, stored in `struct process`. Each process has its own `env[MAX_ENVC][MAX_ENV_LEN]` array. On `spawn()`, the child inherits a copy of the parent's environment. Changes to env in a child do not affect the parent (Unix semantics). CWD is also per-process.
+**wait() semantics:** `wait()` blocks the calling process (SLEEP_WAIT) until any child exits. When a child calls exit(), it becomes a zombie, wakes the parent, and the parent collects the exit code.
+
+**spawn() semantics:** `spawn()` combines fork+exec+wait in a single syscall (legacy). Loads the child into a new slot, parent sleeps until child exits.
+
+**Pipes:** Kernel-buffered IPC channels (256-byte circular buffer, max 8 pipes). Created via `pipe()`, integrated with `read()/write()/close()/dup()/dup2()/fork()`. Blocking uses ecall-retry: when a pipe operation would block, the process sleeps without advancing mepc past the ecall instruction; when woken, the ecall re-executes and retries the operation. Reference counting tracks open read/write ends independently. EOF is returned when all write ends are closed; EPIPE when all read ends are closed.
+
+**Context switching:** The scheduler uses round-robin with timer interrupts. `sys_fork`, `sys_exec`, `sys_exit`, and blocking pipe operations call `schedule()` which selects the next PROC_READY process and switches to it via `trap_ret()`.
+
+**Shell uses fork/exec/wait:** The shell forks a child process, the child calls exec() to run the command, and the parent calls wait() to collect the exit code. This is standard Unix process creation.
+
+**Environment:** Per-process, stored in `struct process`. Each process has its own `env[MAX_ENVC][MAX_ENV_LEN]` array. On `fork()` or `spawn()`, the child inherits a copy of the parent's environment. Changes to env in a child do not affect the parent (Unix semantics). CWD is also per-process.
 
 ## Writing User Programs
 
@@ -211,9 +240,9 @@ int main(void) {
 
 The user library provides:
 - **I/O functions**: `putchar()`, `puts()`, `printf()`, `getchar()`, `gets()`, `read()`, `write()`
-- **File operations**: `open()`, `close()`
+- **File operations**: `open()`, `close()`, `dup()`, `dup2()`, `pipe()`, `unlink()`, `link()`, `rename()`, `stat()`
 - **Directory operations**: `readdir()`, `mkdir()`, `rmdir()`, `mknod()`
-- **Program control**: `exit()`, `spawn()`, `spawnve()`, `chdir()`
+- **Process control**: `exit()`, `fork()`, `exec()`, `execve()`, `wait()`, `getpid()`, `spawn()`, `spawnve()`, `chdir()`, `kill()`, `ps()`
 - **Environment**: `setenv()`, `unsetenv()`, `env_count()`, `getenv()`, `getenv_r()`, `getenv_entry()`, `env_to_envp()`
 - **String functions**: `strlen()`, `strcmp()`, `strncmp()`, `strcpy()`, `strncpy()`, `strchr()`
 - **Memory functions**: `memset()`, `memcpy()`, `memcmp()`
@@ -221,12 +250,25 @@ The user library provides:
 Build produces user programs that are added to the filesystem image:
 - `/bin/hello` — Hello world demo
 - `/bin/spawn_demo` — Demonstrates `spawn()` syscall
-- `/bin/sh` — Interactive shell (loaded by kernel after boot)
+- `/bin/sh` — Interactive shell (loaded by kernel after boot, uses fork/exec/wait)
 - `/bin/ls` — List directory contents
 - `/bin/mkdir` — Create directories
 - `/bin/rmdir` — Remove empty directories
 - `/bin/mknod` — Create device nodes
 - `/bin/env_demo` — Demonstrates environment variable API
+- `/bin/cat` — Display file contents (supports stdin and file arguments; useful as pipeline component)
+- `/bin/fork_demo` — Demonstrates fork(), exec(), wait(), getpid()
+- `/bin/pipe_demo` — Demonstrates pipe(), fork(), dup2() for IPC
+- `/bin/pipe_test` — Comprehensive pipe edge-case tests (partial I/O, EPIPE, buffer capacity, dup refcounting)
+- `/bin/redir_test` — Tests pipe redirection with fork+dup2+exec (capture stdout, feed stdin, pipelines)
+- `/bin/fd_test` — File descriptor management tests (close/reuse, dup/dup2 edge cases, fd inheritance)
+- `/bin/rm` — Remove files
+- `/bin/mv` — Move/rename files and directories
+- `/bin/ln` — Create hard links
+- `/bin/cp` — Copy files
+- `/bin/ps` — List active processes (PID, state, parent)
+- `/bin/kill` — Terminate a process by PID
+- `/bin/ed` — Minimal line editor (open, print, insert, append, delete, write, quit)
 
 ## Interactive Shell
 
@@ -251,6 +293,17 @@ $ mknod /dev/tty 1 0    # Create device node (major 1, minor 0)
 $ /bin/hello            # Run with full path
 $ exit                  # Exit shell (kernel restarts it)
 $ exit 42               # Exit with specific code
+
+# I/O Redirection
+$ echo hello > /tmp/test.txt     # Write stdout to file (creates/truncates)
+$ echo more >> /tmp/test.txt     # Append stdout to file
+$ cat < /tmp/test.txt            # Read stdin from file
+$ cat < /tmp/in.txt > /tmp/out.txt  # Combined input + output redirection
+
+# Pipes
+$ echo hello | cat               # Pipe stdout of left to stdin of right
+$ ls /bin | cat                   # Pipe directory listing through cat
+$ echo hello | cat | cat          # Multi-stage pipeline (up to 4 stages)
 ```
 
 The shell supports:
@@ -260,7 +313,10 @@ The shell supports:
 - Environment variables (`set`, `unset`, `$VAR`, `${VAR}`, and `$?` expansion)
 - Per-process environment: child programs inherit a copy, changes don't affect parent (Unix semantics)
 - PATH-based command lookup (default: `PATH=/bin`)
-- Running external programs via `spawn()` (child runs in separate memory slot, shell preserved)
+- Running external programs via `fork()`+`exec()`+`wait()` (Unix-style process creation)
+- I/O redirection: `>` (truncate), `>>` (append), `<` (input) — operators must be space-separated
+- Pipes: `cmd1 | cmd2 [| cmd3 ...]` — multi-stage pipeline (up to 4 stages) connecting stdout to stdin via kernel pipes
+- Built-in `echo` supports redirection (save/redirect/restore pattern); other built-ins do not
 - Exit status tracking (`$?` holds last program's exit code)
 - Automatic shell restart after `exit` command
 

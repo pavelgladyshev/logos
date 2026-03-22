@@ -28,6 +28,7 @@
 #define FT_FILE            1         /* Regular file */
 #define FT_DIR             2         /* Directory */
 #define FT_CHARDEV         3         /* Character device */
+#define FT_PIPE            4         /* Pipe (IPC) */
 
 /* Error codes */
 #define FS_OK              0
@@ -102,6 +103,15 @@ struct stat_info {
     uint8_t  link_count;       /* Number of hard links */
     uint8_t  major;            /* Major device number */
     uint8_t  minor;            /* Minor device number */
+};
+
+/*
+ * Process information returned by sys_ps
+ */
+struct proc_info {
+    int pid;                   /* Process ID (0 = unused slot) */
+    int state;                 /* PROC_FREE/READY/RUNNING/SLEEPING/ZOMBIE */
+    int parent;                /* Parent slot index (-1 = kernel) */
 };
 
 #endif /* FS_TYPES_H */

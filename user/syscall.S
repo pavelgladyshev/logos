@@ -174,6 +174,76 @@ chdir:
 
     .size chdir, .-chdir
 
+/* int fork(void) */
+    .globl fork
+    .type fork, @function
+fork:
+    li   a7, SYS_fork
+    ecall
+    ret
+
+    .size fork, .-fork
+
+/* int execve(const char *path, char *const argv[], char *const envp[]) */
+    .globl execve
+    .type execve, @function
+execve:
+    li   a7, SYS_exec
+    ecall
+    ret             /* Only returns on failure */
+
+    .size execve, .-execve
+
+/* int wait(void) */
+    .globl wait
+    .type wait, @function
+wait:
+    li   a7, SYS_wait
+    ecall
+    ret
+
+    .size wait, .-wait
+
+/* int getpid(void) */
+    .globl getpid
+    .type getpid, @function
+getpid:
+    li   a7, SYS_getpid
+    ecall
+    ret
+
+    .size getpid, .-getpid
+
+/* int dup(int oldfd) */
+    .globl dup
+    .type dup, @function
+dup:
+    li   a7, SYS_dup
+    ecall
+    ret
+
+    .size dup, .-dup
+
+/* int dup2(int oldfd, int newfd) */
+    .globl dup2
+    .type dup2, @function
+dup2:
+    li   a7, SYS_dup2
+    ecall
+    ret
+
+    .size dup2, .-dup2
+
+/* int pipe(int pipefd[2]) */
+    .globl pipe
+    .type pipe, @function
+pipe:
+    li   a7, SYS_pipe
+    ecall
+    ret
+
+    .size pipe, .-pipe
+
 /* int unlink(const char *path) */
     .globl unlink
     .type unlink, @function
@@ -213,3 +283,23 @@ stat:
     ret
 
     .size stat, .-stat
+
+/* int kill(int pid) */
+    .globl kill
+    .type kill, @function
+kill:
+    li   a7, SYS_kill
+    ecall
+    ret
+
+    .size kill, .-kill
+
+/* int ps(struct proc_info *buf, int max_entries) */
+    .globl ps
+    .type ps, @function
+ps:
+    li   a7, SYS_ps
+    ecall
+    ret
+
+    .size ps, .-ps

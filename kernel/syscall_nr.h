@@ -25,9 +25,18 @@
 #define SYS_getenv_count  13
 #define SYS_getenv_entry  14
 #define SYS_chdir         15
-#define SYS_unlink        16
-#define SYS_link          17
-#define SYS_rename        18
-#define SYS_stat          19
+#define SYS_fork          16
+#define SYS_exec          17
+#define SYS_wait          18
+#define SYS_getpid        19
+#define SYS_dup           20
+#define SYS_dup2          21
+#define SYS_pipe          22
+#define SYS_unlink        23
+#define SYS_link          24
+#define SYS_rename        25
+#define SYS_stat          26
+#define SYS_kill          27
+#define SYS_ps            28
 
 #endif /* SYSCALL_NR_H */

@@ -39,7 +39,7 @@ static void cmd_open(const char *filename)
 {
     int fd;
     char buf[LINE_LEN];
-    int col;
+    int i, col;
 
     fd = open(filename, O_RDONLY);
     if (fd < 0) {
