@@ -32,7 +32,34 @@ int main(int argc, char *argv[])
 
     int i;
     for (i = 0; i < count; i++) {
-        puts(entries[i].name);
+        struct stat_info st;
+        char fullpath[128];
+        int plen;
+
+        /* Build full path: dir + "/" + name */
+        plen = 0;
+        {
+            const char *s = path;
+            while (*s && plen < 126) fullpath[plen++] = *s++;
+        }
+        /* Add separator if path doesn't end with / */
+        if (plen > 0 && fullpath[plen - 1] != '/' && plen < 126)
+            fullpath[plen++] = '/';
+        {
+            const char *s = entries[i].name;
+            while (*s && plen < 127) fullpath[plen++] = *s++;
+        }
+        fullpath[plen] = '\0';
+
+        if (stat(fullpath, &st) == 0) {
+            char *type;
+            if (st.type == 2)      type = "d";
+            else if (st.type == 3) type = "c";
+            else                   type = "-";
+            printf("%s %6u %s\n", type, st.size, entries[i].name);
+        } else {
+            printf("? %6s %s\n", "?", entries[i].name);
+        }
     }
 
     return 0;
