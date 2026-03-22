@@ -462,6 +462,16 @@ static void setup_user_stack(uint32_t stack_top, uint32_t *out_sp, uint32_t *out
     *out_argv = (uint32_t)argv_ptrs;
 }
 
+/* Set process name from path (uses basename) */
+static void proc_set_name(struct process *p, const char *path) {
+    const char *name = path;
+    const char *s = path;
+    while (*s) { if (*s == '/') name = s + 1; s++; }
+    int i;
+    for (i = 0; i < 31 && name[i]; i++) p->name[i] = name[i];
+    p->name[i] = '\0';
+}
+
 /*
  * sys_spawn - Launch a child program in a new process slot
  * a0 = path to executable
@@ -544,6 +554,7 @@ static int32_t sys_spawn(trap_frame_t *tf) {
         proc_free(child_slot);
         return result;  /* Return error to caller */
     }
+    proc_set_name(child, spawn_path_buf);
 
     /* Set up the child's stack with arguments */
     setup_user_stack(child->stack_top, &sp, &argv_addr);
@@ -718,6 +729,7 @@ static int32_t sys_exec(trap_frame_t *tf) {
     if (result != LOAD_OK) {
         return -1;  /* Load failed — original memory is corrupted, but return to caller */
     }
+    proc_set_name(cur, spawn_path_buf);
 
     /* Set up the new stack with arguments */
     setup_user_stack(cur->stack_top, &sp, &argv_addr);
@@ -1444,6 +1456,11 @@ static int32_t sys_ps(trap_frame_t *tf) {
             buf[count].pid = proc_table[i].pid;
             buf[count].state = proc_table[i].state;
             buf[count].parent = proc_table[i].parent;
+            /* Copy program name */
+            int j;
+            for (j = 0; j < 31 && proc_table[i].name[j]; j++)
+                buf[count].name[j] = proc_table[i].name[j];
+            buf[count].name[j] = '\0';
             count++;
         }
     }

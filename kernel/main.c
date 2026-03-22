@@ -125,6 +125,13 @@ int main(void)
             proc_free(slot);
             while (1) {}
         }
+        /* Set process name */
+        {
+            const char *n = "sh";
+            int i;
+            for (i = 0; n[i]; i++) p->name[i] = n[i];
+            p->name[i] = '\0';
+        }
 
         /* Set up process state */
         setup_trap_frame(slot);

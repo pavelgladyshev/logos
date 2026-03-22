@@ -26,7 +26,7 @@ int main(void)
         return 1;
     }
 
-    puts("PID  STATE    PARENT");
+    puts("PID  STATE    PARENT  NAME");
     for (i = 0; i < count; i++) {
         char *state;
         int s = procs[i].state;
@@ -36,7 +36,7 @@ int main(void)
         else if (s == PROC_ZOMBIE) state = "zombie";
         else state = "?";
 
-        printf("%-4d %-8s %d\n", procs[i].pid, state, procs[i].parent);
+        printf("%-4d %-8s %-7d %s\n", procs[i].pid, state, procs[i].parent, procs[i].name);
     }
 
     return 0;

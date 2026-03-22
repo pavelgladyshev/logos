@@ -49,6 +49,7 @@ struct process {
     trap_frame_t     tf;           /* Saved CPU registers (144 bytes) */
     uint32_t         mem_base;     /* Start of memory slot */
     uint32_t         stack_top;    /* Top of stack within slot */
+    char             name[32];     /* Program name (from exec/spawn path) */
     struct fd_entry  fds[MAX_FD];  /* Per-process file descriptors */
     char             env[MAX_ENVC][MAX_ENV_LEN];  /* Per-process environment */
     int              env_count;                     /* Number of env entries */

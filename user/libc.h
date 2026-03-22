@@ -132,6 +132,7 @@ struct proc_info {
     int pid;                     /* Process ID */
     int state;                   /* Process state */
     int parent;                  /* Parent slot index */
+    char name[32];               /* Program name */
 };
 
 /* List directory entries.

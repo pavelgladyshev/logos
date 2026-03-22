@@ -112,6 +112,7 @@ struct proc_info {
     int pid;                   /* Process ID (0 = unused slot) */
     int state;                 /* PROC_FREE/READY/RUNNING/SLEEPING/ZOMBIE */
     int parent;                /* Parent slot index (-1 = kernel) */
+    char name[32];             /* Program name (basename of ELF path) */
 };
 
 #endif /* FS_TYPES_H */

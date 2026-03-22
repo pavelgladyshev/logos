@@ -46,6 +46,7 @@ int proc_alloc(void) {
             proc_table[i].exit_code = 0;
             proc_table[i].sleep_reason = SLEEP_NONE;
             proc_table[i].sleep_chan = -1;
+            proc_table[i].name[0] = '\0';
             return i;
         }
     }
