@@ -16,7 +16,7 @@
 #define BLOCK_SIZE         512       /* Size of each block in bytes */
 #define MAX_FILENAME       28        /* Maximum filename length */
 #define DIRECT_BLOCKS      60        /* Number of direct block pointers in inode */
-#define MAX_INODES         32        /* Maximum number of inodes */
+#define MAX_INODES         64        /* Maximum number of inodes */
 #define MAX_BLOCKS         1024      /* Maximum number of blocks */
 #define ROOT_INODE         0         /* Inode number of root directory */
 
