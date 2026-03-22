@@ -1455,7 +1455,9 @@ static int32_t sys_ps(trap_frame_t *tf) {
         if (proc_table[i].state != PROC_FREE) {
             buf[count].pid = proc_table[i].pid;
             buf[count].state = proc_table[i].state;
-            buf[count].parent = proc_table[i].parent;
+            /* Convert parent slot index to PID (-1 stays as -1) */
+            buf[count].parent = (proc_table[i].parent >= 0)
+                ? proc_table[proc_table[i].parent].pid : -1;
             /* Copy program name */
             int j;
             for (j = 0; j < 31 && proc_table[i].name[j]; j++)
