@@ -131,7 +131,7 @@ struct stat_info {
 struct proc_info {
     int pid;                     /* Process ID */
     int state;                   /* Process state */
-    int parent;                  /* Parent slot index */
+    int parent;                  /* Parent PID (-1 = kernel) */
     char name[32];               /* Program name */
 };
 

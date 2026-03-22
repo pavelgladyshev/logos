@@ -14,15 +14,39 @@ static int console_read(uint8_t minor, void *buf, uint32_t len) {
     uint8_t *dst = (uint8_t *)buf;
     uint32_t i = 0;
 
+    /* Line-buffered input with echo */
     while (i < len) {
         /* Poll for data available (bit 0 of RCR) */
         while ((CONSOLE_RCR & 1) == 0) {
             /* busy wait for keyboard input */
         }
         uint8_t c = (uint8_t)CONSOLE_RDR;
-        if (c == 0x04) {  /* Ctrl-D: signal EOF */
-            break;        /* Return bytes read so far (0 = EOF) */
+
+        if (c == 0x04) {        /* Ctrl-D: signal EOF */
+            break;              /* Return bytes read so far (0 = EOF) */
         }
+
+        if (c == '\b' || c == 0x7F) {  /* Backspace or DEL */
+            if (i > 0) {
+                i--;
+                CONSOLE_DATA = '\b';   /* Move cursor back */
+                CONSOLE_DATA = ' ';    /* Erase character */
+                CONSOLE_DATA = '\b';   /* Move cursor back again */
+            }
+            continue;
+        }
+
+        /* Echo the character */
+        CONSOLE_DATA = c;
+
+        if (c == '\r' || c == '\n') {
+            /* Normalize to newline */
+            if (c == '\r')
+                CONSOLE_DATA = '\n';   /* Echo newline after CR */
+            dst[i++] = '\n';
+            break;                     /* Line complete */
+        }
+
         dst[i++] = c;
     }
 

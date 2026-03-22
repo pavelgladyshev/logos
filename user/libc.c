@@ -70,24 +70,11 @@ char *gets(char *buf, int size)
     int i = 0;
     int c;
 
+    /* Console driver handles echo and backspace */
     while (i < size - 1) {
         c = getchar();
-        if (c < 0) break;  /* EOF or error */
-
-        if (c == '\r' || c == '\n') {
-            putchar('\n');  /* Echo newline */
-            break;
-        }
-
-        if (c == 127 || c == 8) {  /* Backspace or DEL */
-            if (i > 0) {
-                i--;
-                write(STDOUT_FILENO, "\b \b", 3);  /* Erase character on screen */
-            }
-            continue;
-        }
-
-        putchar(c);  /* Echo character */
+        if (c < 0) break;        /* EOF (Ctrl-D) or error */
+        if (c == '\n') break;     /* Line complete (driver echoed it) */
         buf[i++] = c;
     }
     buf[i] = '\0';
