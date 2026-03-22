@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A bare-metal Unix-like OS for RISC-V, designed to run on a simulated RISC-V computer (Logisim). Uses a three-stage boot process (bootloader → kernel → shell): a ROM bootloader loads the kernel from the filesystem into RAM, the kernel initializes subsystems and loads the shell, and the shell provides an interactive command-line interface. Implements block-based storage, inode-based file management (max 32 inodes), directory support with path traversal, a character device driver framework, position-independent executable loading, preemptive multitasking with fork/exec/wait, kernel-buffered pipes for IPC, and a system call interface for user programs.
+A bare-metal Unix-like OS for RISC-V, designed to run on a simulated RISC-V computer (Logisim). Uses a three-stage boot process (bootloader → kernel → shell): a ROM bootloader loads the kernel from the filesystem into RAM, the kernel initializes subsystems and loads the shell, and the shell provides an interactive command-line interface. Implements block-based storage, inode-based file management (max 64 inodes), directory support with path traversal, a character device driver framework, position-independent executable loading, preemptive multitasking with fork/exec/wait, kernel-buffered pipes for IPC, and a system call interface for user programs.
 
 ## Build Commands
 
@@ -74,11 +74,11 @@ Key modules organized by directory:
 | **Host Tools** | | |
 | Host Tool | `fstool.c`, `native_block.c` | Native utility to manage filesystem images |
 
-**Filesystem Layout (512 blocks × 512 bytes):**
+**Filesystem Layout (1024 blocks × 512 bytes):**
 - Block 0: Superblock
-- Blocks 1+: Block allocation bitmap
-- Subsequent blocks: Inode table (32 inodes × 128 bytes)
-- Remaining: Data blocks
+- Blocks 1-2: Block allocation bitmap
+- Blocks 3-18: Inode table (64 inodes × 128 bytes)
+- Blocks 19+: Data blocks
 
 **Memory Layout (Logisim):**
 - 0x00000000-0x0000FFFF: ROM (64KB) — bootloader code (`boot_crt0.S` + `boot_main.c`)
@@ -197,8 +197,8 @@ Each program runs in its own fixed 32KB memory slot with a per-process trap fram
 
 **Process states:**
 - `PROC_FREE` (0) — slot available
-- `PROC_RUNNING` (1) — currently executing on CPU
-- `PROC_READY` (2) — runnable, waiting for CPU
+- `PROC_READY` (1) — runnable, waiting for CPU
+- `PROC_RUNNING` (2) — currently executing on CPU
 - `PROC_SLEEPING` (3) — blocked (waiting for child, I/O, etc.)
 - `PROC_ZOMBIE` (4) — exited, waiting for parent to collect exit code
 
@@ -252,12 +252,12 @@ Build produces user programs that are added to the filesystem image:
 - `/bin/hello` — Hello world demo
 - `/bin/spawn_demo` — Demonstrates `spawn()` syscall
 - `/bin/sh` — Interactive shell (loaded by kernel after boot, uses fork/exec/wait)
-- `/bin/ls` — List directory contents
+- `/bin/ls` — List directory contents with file type, size, and name
 - `/bin/mkdir` — Create directories
 - `/bin/rmdir` — Remove empty directories
 - `/bin/mknod` — Create device nodes
 - `/bin/env_demo` — Demonstrates environment variable API
-- `/bin/cat` — Display file contents (supports stdin and file arguments; useful as pipeline component)
+- `/bin/cat` — Display file contents (supports stdin with Ctrl-D for EOF, and file arguments; useful as pipeline component)
 - `/bin/fork_demo` — Demonstrates fork(), exec(), wait(), getpid()
 - `/bin/pipe_demo` — Demonstrates pipe(), fork(), dup2() for IPC
 - `/bin/pipe_test` — Comprehensive pipe edge-case tests (partial I/O, EPIPE, buffer capacity, dup refcounting)
@@ -267,9 +267,9 @@ Build produces user programs that are added to the filesystem image:
 - `/bin/mv` — Move/rename files and directories
 - `/bin/ln` — Create hard links
 - `/bin/cp` — Copy files
-- `/bin/ps` — List active processes (PID, state, parent)
+- `/bin/ps` — List active processes (PID, state, parent PID, program name)
 - `/bin/kill` — Terminate a process by PID
-- `/bin/ed` — Minimal line editor (open, print, insert, append, delete, write, quit)
+- `/bin/ed` — Minimal line editor (o=open, p=print, `<n>i`=insert before, `<n>a`=append after, `<n>d`=delete, w=write, q=quit; end text input with `.` on a new line)
 
 ## Interactive Shell
 

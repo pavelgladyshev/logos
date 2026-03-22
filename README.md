@@ -123,15 +123,15 @@ Block Device (MMIO @ 0x200000)     Console (MMIO @ 0xFFFF000C)
 
 ### Filesystem
 
-Inode-based filesystem (512 blocks x 512 bytes):
+Inode-based filesystem (1024 blocks x 512 bytes):
 - Block 0: Superblock (magic number, block/inode counts)
 - Blocks 1+: Block allocation bitmap
-- Subsequent blocks: Inode table (32 inodes x 128 bytes each)
+- Subsequent blocks: Inode table (64 inodes x 128 bytes each)
 - Remaining blocks: Data
 
 Managed on the host with `fstool`:
 ```bash
-./fstool/fstool format block_storage.bin 512
+./fstool/fstool format block_storage.bin 1024
 ./fstool/fstool mkdir block_storage.bin /mydir
 ./fstool/fstool add block_storage.bin /mydir/file hostfile.txt
 ./fstool/fstool ls block_storage.bin /
@@ -182,7 +182,7 @@ Programs use `ecall` with the syscall number in `a7` and arguments in `a0`-`a5`:
 - `wait()` blocks until a child exits and returns its exit code
 - Kernel-buffered pipes (256-byte circular buffer, max 8 pipes) with blocking I/O and reference counting
 - Per-process file descriptors, environment variables, and working directory
-- Process states: FREE, RUNNING, READY, SLEEPING, ZOMBIE
+- Process states: FREE, READY, RUNNING, SLEEPING, ZOMBIE
 
 ## Writing User Programs
 
