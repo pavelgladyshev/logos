@@ -6,7 +6,7 @@ A bare-metal Unix-like operating system for RISC-V, designed to run on a simulat
 
 | Version | Branch | Target | Key Features |
 |---------|--------|--------|--------------|
-| **1.0** | [`v1.x`](../../tree/v1.x) | RV32IM M-mode (no timer required) | Single-tasking, spawn-based process model, filesystem, shell, basic utilities |
+| **1.0 Belfield** | [`v1.x`](../../tree/v1.x) | RV32IM M-mode (no timer required) | Single-tasking, spawn-based process model, filesystem, shell, basic utilities |
 | **2.0 Blackrock** | [`main`](../../tree/main) | RV32IM_Zicsr M-mode + timer | Preemptive multitasking, fork/exec/wait, pipes, multi-stage pipelines, I/O redirection |
 | *3.0 Glendalough* | *planned* | RV32 + SV32 MMU | Virtual memory, user/supervisor separation |
 
