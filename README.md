@@ -36,7 +36,7 @@ This builds:
 
 ### Run
 
-1. **First time**: Open `computer.circ` in Logisim Evolution GUI, load `boot-rom.txt` into the ROM component and `block_storage.bin` into the block device, then save the circuit.
+1. **First time**: Open `computer.circ` in Logisim Evolution UCD GUI, load `boot-rom.txt` into the ROM component and `block_storage.bin` into the block device, then save the circuit.
 
 2. **Run from terminal** (faster, no GUI overhead):
    ```bash
