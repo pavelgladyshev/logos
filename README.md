@@ -17,7 +17,7 @@ A bare-metal Unix-like operating system for RISC-V, designed to run on a simulat
 - **Java** (for Logisim Evolution)
 - **RISC-V cross-compiler**: `riscv64-elf-gcc` and `riscv64-elf-ld`
   - macOS (Homebrew): `brew install riscv-gnu-toolchain`
-  - Linux: `sudo apt install build-essential binutils-riscv64-unknown-elf gcc-riscv64-unknown-elf`
+  - Ubuntu Linux: `sudo apt install build-essential binutils-riscv64-unknown-elf gcc-riscv64-unknown-elf`
 - **Logisim Evolution UCD** v4.0.6+: [download from releases](https://github.com/pavelgladyshev/logisim-evolution-ucd/releases)
 
 Update the `RISCV_TOOL_PREFIX` variable in the Makefile if your toolchain is in a different location (default: `/opt/homebrew/bin/riscv64-elf-`).
