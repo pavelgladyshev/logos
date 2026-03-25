@@ -16,9 +16,15 @@ static int console_read(uint8_t minor, void *buf, uint32_t len) {
 
     /* Line-buffered input with echo */
     while (i < len) {
-        /* Poll for data available (bit 0 of RCR) */
+        /* Poll for data available (bit 0 of RCR).
+         * Delay between polls so the Logisim GUI thread can
+         * process key events (simulation thread starvation). */
         while ((CONSOLE_RCR & 1) == 0) {
-            /* busy wait for keyboard input */
+            __asm__ volatile(
+                ".rept 256\n\t"
+                "nop\n\t"
+                ".endr\n\t"
+            );
         }
         uint8_t c = (uint8_t)CONSOLE_RDR;
 
