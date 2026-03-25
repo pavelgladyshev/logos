@@ -32,7 +32,7 @@ make check-pie            # Check user programs for PIE compatibility issues
 
 ```bash
 # Logisim (requires Java and Logisim Evolution)
-java -jar ~/logisim-evolution-ucd-4.0.6-all.jar computer.circ -t tty
+java -jar ~/logisim-evolution-ucd-4.1.0-all.jar computer.circ -t tty
 
 # QEMU (alternative - compiles for RV64)
 make qemu                 # Run in QEMU with serial console

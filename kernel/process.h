@@ -56,6 +56,8 @@ struct process {
     int              env_count;                     /* Number of env entries */
     uint8_t          shm_attached;  /* Bitmap: which SHM segments this process has attached */
     uint8_t          sem_attached;  /* Bitmap: which semaphores this process holds */
+    uint32_t         satp;          /* SATP register value (SV32 mode + ASID + root PPN) */
+    uint32_t         pt_root_pa;    /* Physical address of root page table */
 };
 
 /* Global process table and current process index */

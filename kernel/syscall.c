@@ -19,6 +19,7 @@
 #include "pipe.h"
 #include "shm.h"
 #include "sem.h"
+#include "vm.h"
 
 /* Console minor device number */
 #define CONSOLE_MINOR  0
@@ -570,6 +571,12 @@ static int32_t sys_spawn(trap_frame_t *tf) {
     child->tf.a0 = (uint32_t)spawn_argc;
     child->tf.a1 = argv_addr;
 
+    /* Set up page tables for child process */
+    if (setup_process_vm(child_slot) < 0) {
+        proc_free(child_slot);
+        return -1;
+    }
+
     /* Initialize child's file descriptors (stdin/stdout/stderr) */
     proc_fd_init(child_slot);
 
@@ -674,6 +681,12 @@ static int32_t sys_fork(trap_frame_t *tf) {
                 sem_dup(sem_i);
             }
         }
+    }
+
+    /* Set up page tables for child process */
+    if (setup_process_vm(child_slot) < 0) {
+        proc_free(child_slot);
+        return -1;
     }
 
     /* Set up parent-child relationship */

@@ -25,7 +25,7 @@ NATIVE_CC = gcc
 BUILD_DIR = build
 
 # Common RISC-V compilation flags
-RISCV_CFLAGS = -O -march=$(RISCV_ISA) -mabi=$(RISCV_ABI) -mcmodel=medany -g $(CFLAGS)
+RISCV_CFLAGS = -Os -march=$(RISCV_ISA) -mabi=$(RISCV_ABI) -mcmodel=medany -g $(CFLAGS)
 
 # Default target: build bootloader ROM image
 .DEFAULT_GOAL := boot-rom.txt
@@ -72,14 +72,15 @@ boot-rom.txt: boot-rom
 KERNEL_OBJS = kernel/crt0.o kernel/string.o kernel/console.o kernel/block.o \
               kernel/inode.o kernel/dir.o kernel/file.o kernel/fs.o \
               kernel/device.o kernel/console_dev.o kernel/loader.o \
-              kernel/loader_asm.o kernel/trap.o kernel/process.o \
+              kernel/loader_asm.o kernel/trap.o kernel/m_trap.o kernel/vm.o \
+              kernel/process.o \
               kernel/pipe.o kernel/shm.o kernel/sem.o kernel/syscall.o kernel/main.o
 
 KERNEL_HEADERS = kernel/fs.h kernel/types.h kernel/fs_types.h kernel/string.h \
                  kernel/console.h kernel/block.h kernel/inode.h kernel/dir.h \
                  kernel/file.h kernel/device.h kernel/console_dev.h kernel/elf.h \
-                 kernel/loader.h kernel/trap.h kernel/syscall.h kernel/process.h \
-                 kernel/pipe.h kernel/shm.h kernel/sem.h
+                 kernel/loader.h kernel/trap.h kernel/vm.h kernel/syscall.h \
+                 kernel/process.h kernel/pipe.h kernel/shm.h kernel/sem.h
 
 kernel/%.o: kernel/%.c $(KERNEL_HEADERS)
 	$(RISCV_TOOL_PREFIX)gcc $(RISCV_CFLAGS) -Ikernel -c $< -o $@

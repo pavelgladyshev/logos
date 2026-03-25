@@ -18,7 +18,7 @@ A bare-metal Unix-like operating system for RISC-V, designed to run on a simulat
 - **RISC-V cross-compiler**: `riscv64-elf-gcc` and `riscv64-elf-ld`
   - macOS (Homebrew): `brew install riscv-gnu-toolchain`
   - Ubuntu Linux: `sudo apt install build-essential binutils-riscv64-unknown-elf gcc-riscv64-unknown-elf`
-- **Logisim Evolution UCD** v4.0.6+: [download from releases](https://github.com/pavelgladyshev/logisim-evolution-ucd/releases)
+- **Logisim Evolution UCD** v4.1.0+: [download from releases](https://github.com/pavelgladyshev/logisim-evolution-ucd/releases)
 
 Update the `RISCV_TOOL_PREFIX` variable in the Makefile if your toolchain is in a different location (default: `/opt/homebrew/bin/riscv64-elf-`).
 
@@ -40,7 +40,7 @@ This builds:
 
 2. **Run from terminal** (faster, no GUI overhead):
    ```bash
-   java -jar logisim-evolution-ucd-4.0.6-all.jar computer.circ --tty raw
+   java -jar logisim-evolution-ucd-4.1.0-all.jar computer.circ --tty raw
    ```
 
 You should see the boot sequence followed by an interactive shell prompt:

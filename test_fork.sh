@@ -5,7 +5,7 @@
 set timeout 300
 
 # Start Logisim in headless mode
-spawn java -jar /Users/pavelgladyshev/git/logisim-evolution-ucd/build/libs/logisim-evolution-ucd-4.0.6-all.jar computer.circ -t tty
+spawn java -jar /Users/pavelgladyshev/git/logisim-evolution-ucd/build/libs/logisim-evolution-ucd-4.1.0-all.jar computer.circ -t tty
 
 # Wait for shell prompt
 expect {

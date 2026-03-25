@@ -1,9 +1,11 @@
 /*
- * Assembly language trap handler for RISC-V
+ * Assembly language trap handler for RISC-V (S-mode)
  * Licensed under Creative Commons Attribution International License 4.0
  *
- * Handles interrupts, exceptions, and system calls (ecall).
- * Adapted from multitasking example.
+ * Handles interrupts, exceptions, and system calls in supervisor mode.
+ * Uses sscratch/sepc/sret instead of mscratch/mepc/mret.
+ *
+ * M-mode trap handling (timer forwarding) is in m_trap.S.
  */
 
     .text
@@ -11,16 +13,16 @@
 /*
  * void set_trap_handler(void (*handler)(void), trap_frame_t *tf)
  *
- * Stores the address of assembly trap handler in mtvec register
- * and the address of trap_frame structure in mscratch register.
+ * Stores the address of assembly trap handler in stvec register
+ * and the address of trap_frame structure in sscratch register.
  *
  * a0 = address of trap_handler function
  * a1 = address of trap_frame structure
  */
     .globl set_trap_handler
 set_trap_handler:
-    csrw mtvec, a0
-    csrw mscratch, a1
+    csrw 0x105, a0     /* stvec = a0 */
+    csrw 0x140, a1     /* sscratch = a1 */
     ret
 
 /*
@@ -28,6 +30,7 @@ set_trap_handler:
  * uint32_t get_mie(void)
  *
  * Read/write machine interrupt enable register.
+ * Still needed for M-mode init before dropping to S-mode.
  */
     .globl set_mie
 set_mie:
@@ -43,6 +46,7 @@ get_mie:
  * void set_mstatus_bit(uint32_t mask)
  *
  * Set bits in mstatus register.
+ * Used during M-mode init.
  */
     .globl set_mstatus_bit
 set_mstatus_bit:
@@ -53,39 +57,42 @@ set_mstatus_bit:
  * void enable_interrupts(void)
  * void disable_interrupts(void)
  *
- * Globally enable/disable interrupt handling via mstatus.MIE bit.
+ * Enable/disable S-mode interrupts via sstatus.SIE bit (bit 1).
  */
     .globl enable_interrupts
 enable_interrupts:
-    csrsi mstatus, 8    /* Set MIE bit (bit 3) */
+    li   t0, 2             /* SIE bit (bit 1) */
+    csrs 0x100, t0         /* sstatus |= SIE */
     ret
 
     .globl disable_interrupts
 disable_interrupts:
-    csrci mstatus, 8    /* Clear MIE bit (bit 3) */
+    li   t0, 2             /* SIE bit (bit 1) */
+    csrc 0x100, t0         /* sstatus &= ~SIE */
     ret
 
 /*
  * uint32_t get_mcause(void)
  *
- * Return value of mcause register (reason for trap).
+ * Return value of scause register (reason for S-mode trap).
+ * Named get_mcause for backward compatibility with existing C code.
  */
     .globl get_mcause
 get_mcause:
-    csrr a0, mcause
+    csrr a0, 0x142         /* scause */
     ret
 
 /*
- * trap_handler - Entry point for all interrupts, exceptions, and ecalls.
+ * trap_handler - Entry point for S-mode traps.
  *
  * Saves complete CPU context to trap_frame, switches to kernel stack,
  * then calls C trap handler c_trap_handler(trap_frame_t *tf).
  */
     .globl trap_handler
 trap_handler:
-    /* Atomically swap a0 and mscratch.
-     * After this: a0 = pointer to trap_frame, mscratch = old a0 value */
-    csrrw a0, mscratch, a0
+    /* Atomically swap a0 and sscratch.
+     * After this: a0 = pointer to trap_frame, sscratch = old a0 value */
+    csrrw a0, 0x140, a0   /* sscratch */
 
     /* Save all general-purpose registers to trap_frame */
     sw ra,  20(a0)
@@ -120,12 +127,12 @@ trap_handler:
     sw t5, 136(a0)
     sw t6, 140(a0)
 
-    /* Save mepc (exception program counter) to trap_frame */
-    csrr t0, mepc
+    /* Save sepc (exception program counter) to trap_frame */
+    csrr t0, 0x141         /* sepc */
     sw t0, 12(a0)
 
-    /* Save the original a0 value (now in mscratch) to trap_frame */
-    csrr t0, mscratch
+    /* Save the original a0 value (now in sscratch) to trap_frame */
+    csrr t0, 0x140         /* sscratch */
     sw t0, 56(a0)
 
     /* Switch to kernel stack (stored in trap_frame->c_trap_sp) */
@@ -145,20 +152,20 @@ trap_handler:
 /*
  * void trap_ret(trap_frame_t *tf)
  *
- * Restore CPU context from trap_frame and return to user program.
- * This function never returns - it jumps back to the interrupted code.
+ * Restore CPU context from trap_frame and return to user/supervisor program.
+ * This function never returns - it jumps back to the interrupted code via sret.
  *
  * a0 = pointer to trap_frame
  */
     .globl trap_ret
 trap_ret:
-    /* Restore mepc from trap_frame */
+    /* Restore sepc from trap_frame */
     lw t0, 12(a0)
-    csrw mepc, t0
+    csrw 0x141, t0         /* sepc */
 
-    /* Put saved a0 value in mscratch for final atomic swap */
+    /* Put saved a0 value in sscratch for final atomic swap */
     lw t0, 56(a0)
-    csrw mscratch, t0
+    csrw 0x140, t0         /* sscratch */
 
     /* Restore all general-purpose registers except a0 */
     lw ra,  20(a0)
@@ -170,7 +177,7 @@ trap_ret:
     lw t2,  44(a0)
     lw s0,  48(a0)
     lw s1,  52(a0)
-    /* a0 restored via mscratch swap below */
+    /* a0 restored via sscratch swap below */
     lw a1,  60(a0)
     lw a2,  64(a0)
     lw a3,  68(a0)
@@ -193,11 +200,11 @@ trap_ret:
     lw t5, 136(a0)
     lw t6, 140(a0)
 
-    /* Atomically restore a0 and save trap_frame pointer back to mscratch */
-    csrrw a0, mscratch, a0
+    /* Atomically restore a0 and save trap_frame pointer back to sscratch */
+    csrrw a0, 0x140, a0   /* sscratch */
 
-    /* Return from machine-mode trap to the address in mepc */
-    mret
+    /* Return from supervisor-mode trap to the address in sepc */
+    sret
 
 /*
  * int run_user_program(trap_frame_t *tf)

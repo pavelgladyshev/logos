@@ -11,6 +11,7 @@
 #include "sem.h"          /* for sem_close */
 #include "string.h"
 #include "trap.h"
+#include "vm.h"
 
 /* Timer MMIO registers */
 #define TIMER_MTIME    ((volatile uint32_t *)0x200bff8)
@@ -98,6 +99,13 @@ void proc_free(int slot) {
     proc_close_pipes(slot);
     proc_close_shm(slot);
     proc_close_sems(slot);
+
+    /* Free page tables if allocated */
+    if (proc_table[slot].pt_root_pa) {
+        pt_free_all(proc_table[slot].pt_root_pa);
+        proc_table[slot].pt_root_pa = 0;
+        proc_table[slot].satp = 0;
+    }
 
     proc_table[slot].state = PROC_FREE;
     proc_table[slot].pid = 0;
@@ -215,6 +223,12 @@ void schedule(void) {
         if (proc_table[next].state == PROC_READY) {
             proc_table[next].state = PROC_RUNNING;
             current_proc = next;
+            /* Switch address space */
+            write_satp(proc_table[next].satp);
+            sfence_vma();
+            /* Set SPP=0 (User) so sret drops to U-mode */
+            clear_spp();
+            set_spie();
             set_trap_handler(trap_handler, &proc_table[next].tf);
             trap_ret(&proc_table[next].tf);  /* never returns */
         }
