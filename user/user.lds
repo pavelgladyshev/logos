@@ -11,8 +11,8 @@ ENTRY(_start)
 
 SECTIONS
 {
-    /* Start at address 0 - will be relocated at load time */
-    . = 0;
+    /* Start at USER_VA_BASE — all user programs share this virtual address */
+    . = 0x00400000;
 
     .text : {
         *(.init)

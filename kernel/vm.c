@@ -146,27 +146,32 @@ void unmap_page(uint32_t root_pa, uint32_t va)
 void build_kernel_mappings(uint32_t root_pa)
 {
     /*
-     * Identity-map kernel and system regions (no U bit).
-     * These are accessible only from S-mode (supervisor), not U-mode.
+     * Identity-map kernel and system regions (no U bit) using megapages.
+     * Megapages are critical for performance — the Logisim TLB is small and
+     * direct-mapped, so 4KB page mappings cause severe TLB thrashing.
      *
-     * We use a megapage for the first 4MB (0x00000000-0x003FFFFF) which
-     * covers ROM, kernel, process slots, SHM, and PT pool.
-     * Then map MMIO regions.
+     * L1[0]: 0x00000000-0x003FFFFF megapage (kernel + PT pool + block MMIO)
+     *        Supervisor-only (no U bit). Covers ROM, kernel, SHM, PT pool.
+     *        Process slots (0x110000-0x14FFFF) are also covered but without
+     *        U bit — user code cannot execute here. User code is mapped
+     *        separately at USER_VA_BASE (different L1 entry) via build_user_mappings().
+     *
+     * L1[1023]: 0xFFC00000-0xFFFFFFFF megapage (console MMIO at 0xFFFF0xxx)
      */
 
-    /* 0x00000000-0x003FFFFF: megapage covering ROM + kernel + slots + SHM + PT pool */
+    /* 0x00000000-0x003FFFFF: kernel megapage (supervisor-only) */
     map_megapage(root_pa, 0x00000000, 0x00000000, PTE_KERN_RWX);
 
-    /* 0x00200000 is within the first megapage above, so block device MMIO is covered */
-
-    /* 0xFFC00000-0xFFFFFFFF: megapage for console MMIO at 0xFFFF0xxx */
+    /* 0xFFC00000-0xFFFFFFFF: console MMIO megapage (supervisor-only) */
     map_megapage(root_pa, 0xFFC00000, 0xFFC00000, PTE_KERN_RW);
 }
 
 void build_user_mappings(uint32_t root_pa, int slot)
 {
     uint32_t pa = PROC_SLOT_BASE(slot);
+    /* Map physical slot to USER_VA_BASE (0x400000) with U bit */
     map_range(root_pa, USER_VA_BASE, pa, PROC_SLOT_SIZE, PTE_USER_RWX);
+    /* Note: shared memory is mapped on demand by sys_shmat */
 }
 
 /* ============================
@@ -181,10 +186,7 @@ int setup_process_vm(int slot)
 
     p->pt_root_pa = pt_root;
     build_kernel_mappings(pt_root);
-    /* Identity-map process slot with U bit */
-    map_range(pt_root, p->mem_base, p->mem_base, PROC_SLOT_SIZE, PTE_USER_RWX);
-    /* Identity-map shared memory with U bit */
-    map_range(pt_root, SHM_BASE_ADDR, SHM_BASE_ADDR, MAX_SHM * SHM_SEG_SIZE, PTE_USER_RW);
+    build_user_mappings(pt_root, slot);
     /* SATP: SV32 mode, ASID=slot, root PPN */
     p->satp = MAKE_SATP(1, slot, PA_TO_PPN(pt_root));
     return 0;

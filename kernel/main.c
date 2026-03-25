@@ -132,9 +132,10 @@ static void s_mode_main(void) {
     printf("Type 'help' for available commands\n\n");
 
     for (;;) {
-        int slot = proc_alloc();
+        int slot;
         struct process *p;
 
+        slot = proc_alloc();
         if (slot < 0) {
             printf("ERROR: No free process slot\n");
             printf("Halting.\n");
@@ -165,9 +166,10 @@ static void s_mode_main(void) {
         /* Set up process state */
         setup_trap_frame(slot);
         setup_process_vm(slot);
-        p->tf.mepc = info.entry_point;  /* field name is mepc but holds sepc value */
+        /* Use virtual addresses — entry point is offset from slot base, mapped at USER_VA_BASE */
+        p->tf.mepc = USER_VA_BASE + (info.entry_point - p->mem_base);
         p->tf.ra = 0;
-        p->tf.sp = p->stack_top;
+        p->tf.sp = USER_STACK_TOP;
         p->tf.a0 = 0;  /* argc = 0 */
         p->tf.a1 = 0;  /* argv = NULL */
         p->state = PROC_RUNNING;
@@ -182,6 +184,15 @@ static void s_mode_main(void) {
         clear_spp();   /* SPP=0 so sret drops to U-mode */
         set_spie();    /* SPIE=1 so sret enables interrupts */
         set_trap_handler(trap_handler, &p->tf);
+        /* Enable timer for preemptive scheduling (first time only) */
+        {
+            static int timer_started = 0;
+            if (!timer_started) {
+                set_mie(0x80);   /* MIE.MTIE (bit 7) */
+                *TIMER_MTIMECMP = *TIMER_MTIME + TIME_SLICE;
+                timer_started = 1;
+            }
+        }
         run_user_program(&p->tf);
 
         /* Shell exited — save exit code for next shell instance */
@@ -220,11 +231,8 @@ int main(void)
     /* 2. Install M-mode timer forwarder (stays in mtvec permanently) */
     set_mtvec((uint32_t)m_trap_handler);
 
-    /* 3. Enable M-mode timer interrupt */
-    set_mie(0x80);   /* MIE.MTIE (bit 7) */
-
-    /* 4. Arm the first timer tick */
-    *TIMER_MTIMECMP = *TIMER_MTIME + TIME_SLICE;
+    /* 3. Enable M-mode timer interrupt — delayed until after S-mode setup */
+    /* set_mie(0x80) and timer arming moved to s_mode_main after shell is loaded */
 
     /* 5. Enable supervisor timer interrupt in SIE */
     write_sie(0x20);  /* SIE.STIE (bit 5) */
