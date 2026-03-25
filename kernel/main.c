@@ -197,21 +197,16 @@ int main(void)
 {
     int result;
 
-    printf("Welcome to logOS 3.0 Glendalough!\n\n");
-
     /* Initialize subsystems (still in M-mode) */
     console_dev_init();
     proc_init();
     vm_init();
 
-    /* Mount the filesystem */
-    printf("Mounting filesystem...\n");
     result = fs_mount();
     if (result != FS_OK) {
-        printf("ERROR: fs_mount failed with code %d\n", result);
+        printf("ERROR: fs_mount failed (%d)\n", result);
         return result;
     }
-    printf("Filesystem mounted.\n\n");
 
     /* === Set up M-mode delegation and drop to S-mode === */
 
@@ -242,7 +237,7 @@ int main(void)
     /* 8. Drop to S-mode with interrupts DISABLED.
      * Set MPP=Supervisor, MPIE=0 so that mret clears SIE.
      * s_mode_main will enable interrupts after setting up the trap handler. */
-    printf("Dropping to S-mode...\n");
+    /* Drop to S-mode */
     {
         /* Clear MPP, set to Supervisor (01). Keep MPIE=0. */
         uint32_t mstatus;
