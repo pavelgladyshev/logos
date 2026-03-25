@@ -92,7 +92,7 @@ void boot_main(void)
         }
         /* Load indirect blocks if needed */
         if (loaded < file_size && kernel_in.indirect != 0) {
-            uint16_t ind_entries[BLOCK_SIZE / sizeof(uint16_t)];
+            static uint16_t ind_entries[BLOCK_SIZE / sizeof(uint16_t)];
             int i;
 
             if (boot_block_read(kernel_in.indirect, ind_entries) != 0) {

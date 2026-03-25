@@ -184,15 +184,6 @@ static void s_mode_main(void) {
         clear_spp();   /* SPP=0 so sret drops to U-mode */
         set_spie();    /* SPIE=1 so sret enables interrupts */
         set_trap_handler(trap_handler, &p->tf);
-        /* Enable timer for preemptive scheduling (first time only) */
-        {
-            static int timer_started = 0;
-            if (!timer_started) {
-                set_mie(0x80);   /* MIE.MTIE (bit 7) */
-                *TIMER_MTIMECMP = *TIMER_MTIME + TIME_SLICE;
-                timer_started = 1;
-            }
-        }
         run_user_program(&p->tf);
 
         /* Shell exited — save exit code for next shell instance */
@@ -231,8 +222,11 @@ int main(void)
     /* 2. Install M-mode timer forwarder (stays in mtvec permanently) */
     set_mtvec((uint32_t)m_trap_handler);
 
-    /* 3. Enable M-mode timer interrupt — delayed until after S-mode setup */
-    /* set_mie(0x80) and timer arming moved to s_mode_main after shell is loaded */
+    /* 3. Enable M-mode timer interrupt */
+    set_mie(0x80);   /* MIE.MTIE (bit 7) */
+
+    /* 4. Arm the first timer tick */
+    *TIMER_MTIMECMP = *TIMER_MTIME + TIME_SLICE;
 
     /* 5. Enable supervisor timer interrupt in SIE */
     write_sie(0x20);  /* SIE.STIE (bit 5) */

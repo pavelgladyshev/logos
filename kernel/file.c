@@ -224,7 +224,11 @@ int file_write(uint32_t ino, uint32_t offset, const void *buf, uint32_t len) {
                 bnum = nb;
             }
         } else {
-            /* Indirect block region */
+            /* Indirect block region.
+             * Note: block_alloc() uses block_buf internally (to clear the
+             * new block and update the bitmap), so we must read the indirect
+             * block AFTER any allocation, not before. */
+            uint32_t ind_idx = block_idx - DIRECT_BLOCKS;
             if (in.indirect == 0) {
                 int ib = block_alloc();
                 if (ib < 0) {
@@ -233,14 +237,11 @@ int file_write(uint32_t ino, uint32_t offset, const void *buf, uint32_t len) {
                     return bytes_written > 0 ? bytes_written : ib;
                 }
                 in.indirect = ib;
-                memset(block_buf, 0, BLOCK_SIZE);
-                block_write(ib, block_buf);
+                /* block_alloc already zeroed the block */
             }
-            /* Read indirect block, allocate data block if needed */
+            /* Read indirect block to check if data block exists */
             block_read(in.indirect, block_buf);
-            uint16_t *entries = (uint16_t *)block_buf;
-            uint32_t ind_idx = block_idx - DIRECT_BLOCKS;
-            bnum = entries[ind_idx];
+            bnum = ((uint16_t *)block_buf)[ind_idx];
             if (bnum == 0) {
                 int nb = block_alloc();
                 if (nb < 0) {
@@ -248,9 +249,11 @@ int file_write(uint32_t ino, uint32_t offset, const void *buf, uint32_t len) {
                     inode_write(ino, &in);
                     return bytes_written > 0 ? bytes_written : nb;
                 }
-                entries[ind_idx] = nb;
-                block_write(in.indirect, block_buf);
                 bnum = nb;
+                /* Re-read indirect block (block_alloc clobbered block_buf) */
+                block_read(in.indirect, block_buf);
+                ((uint16_t *)block_buf)[ind_idx] = bnum;
+                block_write(in.indirect, block_buf);
             }
         }
 
