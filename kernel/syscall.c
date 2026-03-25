@@ -17,6 +17,8 @@
 #include "string.h"
 #include "process.h"
 #include "pipe.h"
+#include "shm.h"
+#include "sem.h"
 
 /* Console minor device number */
 #define CONSOLE_MINOR  0
@@ -646,6 +648,30 @@ static int32_t sys_fork(trap_frame_t *tf) {
             if (child->fds[fd_i].in_use && child->fds[fd_i].type == FT_PIPE) {
                 pipe_dup_fd((int)child->fds[fd_i].inode,
                             (int)child->fds[fd_i].minor);
+            }
+        }
+    }
+
+    /* Increment SHM refcounts for all segments attached by parent */
+    child->shm_attached = parent->shm_attached;
+    {
+        int shm_i;
+        uint8_t mask = child->shm_attached;
+        for (shm_i = 0; shm_i < MAX_SHM; shm_i++) {
+            if (mask & (1 << shm_i)) {
+                shm_dup(shm_i);
+            }
+        }
+    }
+
+    /* Increment semaphore refcounts for all semaphores held by parent */
+    child->sem_attached = parent->sem_attached;
+    {
+        int sem_i;
+        uint8_t mask = child->sem_attached;
+        for (sem_i = 0; sem_i < MAX_SEMS; sem_i++) {
+            if (mask & (1 << sem_i)) {
+                sem_dup(sem_i);
             }
         }
     }
@@ -1470,6 +1496,141 @@ static int32_t sys_ps(trap_frame_t *tf) {
     return count;
 }
 
+/* ================================================================
+ * Shared Memory syscalls
+ * ================================================================ */
+
+/*
+ * sys_shmget - Get/create shared memory segment
+ * a0 = key, a1 = flags
+ * Returns: segment index on success, -1 on error
+ */
+static int32_t sys_shmget(trap_frame_t *tf) {
+    int key = (int)tf->a0;
+    int flags = (int)tf->a1;
+    return shm_get(key, flags);
+}
+
+/*
+ * sys_shmat - Attach to shared memory segment
+ * a0 = shm_id (segment index)
+ * Returns: physical address of segment, 0 on error
+ */
+static int32_t sys_shmat(trap_frame_t *tf) {
+    int shm_id = (int)tf->a0;
+    uint32_t addr;
+
+    if (shm_id < 0 || shm_id >= MAX_SHM) return 0;
+
+    /* Already attached — just return the address */
+    if (proc_table[current_proc].shm_attached & (1 << shm_id)) {
+        return (int32_t)shm_table[shm_id].addr;
+    }
+
+    addr = shm_attach(shm_id);
+    if (addr != 0) {
+        proc_table[current_proc].shm_attached |= (uint8_t)(1 << shm_id);
+    }
+    return (int32_t)addr;
+}
+
+/*
+ * sys_shmdt - Detach from shared memory segment
+ * a0 = shm_id (segment index)
+ * Returns: 0 on success, -1 on error
+ */
+static int32_t sys_shmdt(trap_frame_t *tf) {
+    int shm_id = (int)tf->a0;
+
+    if (shm_id < 0 || shm_id >= MAX_SHM) return -1;
+    if (!(proc_table[current_proc].shm_attached & (1 << shm_id))) {
+        return -1;  /* Not attached */
+    }
+
+    proc_table[current_proc].shm_attached &= (uint8_t)~(1 << shm_id);
+    shm_detach(shm_id);
+    return 0;
+}
+
+/* ================================================================
+ * Semaphore syscalls
+ * ================================================================ */
+
+/*
+ * sys_semget - Get/create semaphore
+ * a0 = key, a1 = initial value, a2 = flags
+ * Returns: semaphore index on success, -1 on error
+ */
+static int32_t sys_semget(trap_frame_t *tf) {
+    int key = (int)tf->a0;
+    int init_value = (int)tf->a1;
+    int flags = (int)tf->a2;
+    int sem_id;
+
+    sem_id = sem_get(key, init_value, flags);
+    if (sem_id >= 0) {
+        /* Mark this process as holding a reference (if not already) */
+        if (!(proc_table[current_proc].sem_attached & (1 << sem_id))) {
+            proc_table[current_proc].sem_attached |= (uint8_t)(1 << sem_id);
+            sem_table[sem_id].refcount++;
+        }
+    }
+    return sem_id;
+}
+
+/*
+ * sys_semwait - Wait (decrement) semaphore
+ * a0 = sem_id
+ * Returns: 0 on success, -1 on error
+ *
+ * Uses ecall-retry pattern: if value==0, process sleeps with SLEEP_SEM.
+ * When woken, the ecall re-executes and retries.
+ */
+static int32_t sys_semwait(trap_frame_t *tf) {
+    int sem_id = (int)tf->a0;
+    int result;
+
+    if (sem_id < 0 || sem_id >= MAX_SEMS) return -1;
+
+    result = sem_wait(sem_id);
+    if (result == -2) {
+        /* Would block: sleep and retry (ecall will re-execute) */
+        proc_table[current_proc].state = PROC_SLEEPING;
+        proc_table[current_proc].sleep_reason = SLEEP_SEM;
+        proc_table[current_proc].sleep_chan = sem_id;
+        schedule();  /* never returns; woken process re-executes ecall */
+    }
+    return result;
+}
+
+/*
+ * sys_sempost - Post (increment) semaphore
+ * a0 = sem_id
+ * Returns: 0 on success, -1 on error
+ */
+static int32_t sys_sempost(trap_frame_t *tf) {
+    int sem_id = (int)tf->a0;
+    return sem_post(sem_id);
+}
+
+/*
+ * sys_semclose - Close semaphore handle
+ * a0 = sem_id
+ * Returns: 0 on success, -1 on error
+ */
+static int32_t sys_semclose(trap_frame_t *tf) {
+    int sem_id = (int)tf->a0;
+
+    if (sem_id < 0 || sem_id >= MAX_SEMS) return -1;
+    if (!(proc_table[current_proc].sem_attached & (1 << sem_id))) {
+        return -1;  /* Not attached */
+    }
+
+    proc_table[current_proc].sem_attached &= (uint8_t)~(1 << sem_id);
+    sem_close(sem_id);
+    return 0;
+}
+
 /*
  * Dispatch a system call.
  * Returns 1 if the top-level program should exit (shell with no parent),
@@ -1603,6 +1764,34 @@ int syscall_dispatch(trap_frame_t *tf) {
 
         case SYS_ps:
             result = sys_ps(tf);
+            break;
+
+        case SYS_shmget:
+            result = sys_shmget(tf);
+            break;
+
+        case SYS_shmat:
+            result = sys_shmat(tf);
+            break;
+
+        case SYS_shmdt:
+            result = sys_shmdt(tf);
+            break;
+
+        case SYS_semget:
+            result = sys_semget(tf);
+            break;
+
+        case SYS_semwait:
+            result = sys_semwait(tf);
+            break;
+
+        case SYS_sempost:
+            result = sys_sempost(tf);
+            break;
+
+        case SYS_semclose:
+            result = sys_semclose(tf);
             break;
 
         default:

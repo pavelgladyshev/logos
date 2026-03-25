@@ -303,3 +303,73 @@ ps:
     ret
 
     .size ps, .-ps
+
+/* int shmget(int key, int flags) */
+    .globl shmget
+    .type shmget, @function
+shmget:
+    li   a7, SYS_shmget
+    ecall
+    ret
+
+    .size shmget, .-shmget
+
+/* void *shmat(int shm_id) */
+    .globl shmat
+    .type shmat, @function
+shmat:
+    li   a7, SYS_shmat
+    ecall
+    ret
+
+    .size shmat, .-shmat
+
+/* int shmdt(int shm_id) */
+    .globl shmdt
+    .type shmdt, @function
+shmdt:
+    li   a7, SYS_shmdt
+    ecall
+    ret
+
+    .size shmdt, .-shmdt
+
+/* int semget(int key, int value, int flags) */
+    .globl semget
+    .type semget, @function
+semget:
+    li   a7, SYS_semget
+    ecall
+    ret
+
+    .size semget, .-semget
+
+/* int semwait(int sem_id) */
+    .globl semwait
+    .type semwait, @function
+semwait:
+    li   a7, SYS_semwait
+    ecall
+    ret
+
+    .size semwait, .-semwait
+
+/* int sempost(int sem_id) */
+    .globl sempost
+    .type sempost, @function
+sempost:
+    li   a7, SYS_sempost
+    ecall
+    ret
+
+    .size sempost, .-sempost
+
+/* int semclose(int sem_id) */
+    .globl semclose
+    .type semclose, @function
+semclose:
+    li   a7, SYS_semclose
+    ecall
+    ret
+
+    .size semclose, .-semclose

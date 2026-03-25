@@ -1,0 +1,4 @@
+# /etc/rc - System startup script
+# This script runs automatically when the shell starts.
+
+echo Welcome to logOS!

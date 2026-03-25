@@ -38,5 +38,12 @@
 #define SYS_stat          26
 #define SYS_kill          27
 #define SYS_ps            28
+#define SYS_shmget        29
+#define SYS_shmat         30
+#define SYS_shmdt         31
+#define SYS_semget        32
+#define SYS_semwait       33
+#define SYS_sempost       34
+#define SYS_semclose      35
 
 #endif /* SYSCALL_NR_H */

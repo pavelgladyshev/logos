@@ -9,6 +9,11 @@
  *
  * I/O redirection: cmd > file, cmd >> file, cmd < file
  * Pipes: cmd1 | cmd2 [| cmd3 ...] (up to MAX_PIPE_STAGES stages)
+ * Background: cmd & (fork+exec without waiting)
+ *
+ * Scripting: sh scriptfile, /etc/rc auto-sourced on boot
+ * Comments: # at start of line
+ * Flow control: if/then/else/fi, while/do/done, for/in/do/done
  */
 
 #include "libc.h"
@@ -17,11 +22,74 @@
 #define MAX_ARGS         8
 #define MAX_PATH_LEN     64
 #define MAX_PIPE_STAGES  4
+#define MAX_BLOCK_LINES  16
 
 /* Redirection modes */
 #define REDIR_NONE    0
 #define REDIR_TRUNC   1   /* >  */
 #define REDIR_APPEND  2   /* >> */
+
+/* ================================================================
+ * Global script state
+ * ================================================================ */
+
+static int script_fd = -1;       /* -1 = interactive, >= 0 = reading from file */
+static int non_interactive = 0;  /* 1 = exit on EOF (script argument mode) */
+
+/* ================================================================
+ * Line reading
+ * ================================================================ */
+
+/*
+ * Read one line from a file descriptor, byte by byte.
+ * Stops at newline or EOF. Does NOT include the newline in buf.
+ * Returns number of chars read, or -1 on EOF (no data).
+ */
+static int read_line(int fd, char *buf, int size)
+{
+    int n = 0;
+    char c;
+    int r;
+
+    while (n < size - 1) {
+        r = read(fd, &c, 1);
+        if (r <= 0) {
+            /* EOF */
+            if (n == 0) return -1;  /* No data at all */
+            break;
+        }
+        if (c == '\n') break;
+        buf[n++] = c;
+    }
+    buf[n] = '\0';
+    return n;
+}
+
+/*
+ * Get next command line from appropriate source.
+ * In interactive mode: prints prompt, reads from stdin via gets().
+ * In script mode: reads from script_fd via read_line().
+ * Returns 0 on success, -1 on EOF.
+ */
+static int get_line(char *buf, int size)
+{
+    if (script_fd >= 0) {
+        return read_line(script_fd, buf, size) >= 0 ? 0 : -1;
+    }
+
+    /* Interactive mode */
+    char *cwd = getenv("CWD");
+    if (cwd) write(STDOUT_FILENO, cwd, strlen(cwd));
+    write(STDOUT_FILENO, "$ ", 2);
+    gets(buf, size);
+
+    /* gets() returns empty string on EOF from console — treat as valid */
+    return 0;
+}
+
+/* ================================================================
+ * String utilities
+ * ================================================================ */
 
 /*
  * Expand $VAR references in a string.
@@ -81,11 +149,35 @@ static void expand_vars(const char *in, char *out, int outsize)
 }
 
 /*
+ * Skip leading whitespace and check if line is a comment or empty.
+ * Returns pointer to first non-whitespace char.
+ */
+static const char *skip_ws(const char *s)
+{
+    while (*s == ' ' || *s == '\t') s++;
+    return s;
+}
+
+/*
+ * Check if a string starts with a given keyword followed by space/tab/NUL.
+ * Returns 1 if match, 0 otherwise.
+ */
+static int starts_with_keyword(const char *line, const char *kw)
+{
+    const char *s = skip_ws(line);
+    int len = strlen(kw);
+    if (strncmp(s, kw, len) != 0) return 0;
+    return (s[len] == '\0' || s[len] == ' ' || s[len] == '\t');
+}
+
+/* ================================================================
+ * Parsing
+ * ================================================================ */
+
+/*
  * Parse command line into argv array.
  * Modifies 'line' in place by replacing spaces with NULs.
  * Returns argc (number of arguments).
- *
- * Note: argv array is built at runtime to avoid PIE relocation issues.
  */
 static int parse_cmd(char *line, char *argv[], int max_args)
 {
@@ -95,18 +187,18 @@ static int parse_cmd(char *line, char *argv[], int max_args)
     while (*line && argc < max_args - 1) {
         if (*line == ' ' || *line == '\t') {
             if (in_word) {
-                *line = '\0';  /* Terminate current argument */
+                *line = '\0';
                 in_word = 0;
             }
         } else {
             if (!in_word) {
-                argv[argc++] = line;  /* Start new argument */
+                argv[argc++] = line;
                 in_word = 1;
             }
         }
         line++;
     }
-    argv[argc] = (char *)0;  /* NULL terminate argv array */
+    argv[argc] = (char *)0;
     return argc;
 }
 
@@ -114,12 +206,6 @@ static int parse_cmd(char *line, char *argv[], int max_args)
  * Parse redirection operators from argv.
  * Scans for >, >>, < tokens and extracts filenames.
  * Removes redirection tokens from argv, adjusting argc.
- *
- * redir_out:      receives output filename (or empty string)
- * redir_out_mode: receives REDIR_NONE, REDIR_TRUNC, or REDIR_APPEND
- * redir_in:       receives input filename (or empty string)
- * has_redir_in:   set to 1 if < found, 0 otherwise
- *
  * Returns new argc after removing redirection tokens.
  */
 static int parse_redirections(int argc, char *argv[],
@@ -136,7 +222,6 @@ static int parse_redirections(int argc, char *argv[],
 
     i = 0;
     while (i < argc) {
-        /* Check for >> (must check before >) */
         if (argv[i][0] == '>' && argv[i][1] == '>' && argv[i][2] == '\0') {
             if (i + 1 < argc) {
                 strncpy(redir_out, argv[i + 1], MAX_PATH_LEN - 1);
@@ -145,9 +230,7 @@ static int parse_redirections(int argc, char *argv[],
                 i += 2;
                 continue;
             }
-        }
-        /* Check for > */
-        else if (argv[i][0] == '>' && argv[i][1] == '\0') {
+        } else if (argv[i][0] == '>' && argv[i][1] == '\0') {
             if (i + 1 < argc) {
                 strncpy(redir_out, argv[i + 1], MAX_PATH_LEN - 1);
                 redir_out[MAX_PATH_LEN - 1] = '\0';
@@ -155,9 +238,7 @@ static int parse_redirections(int argc, char *argv[],
                 i += 2;
                 continue;
             }
-        }
-        /* Check for < */
-        else if (argv[i][0] == '<' && argv[i][1] == '\0') {
+        } else if (argv[i][0] == '<' && argv[i][1] == '\0') {
             if (i + 1 < argc) {
                 strncpy(redir_in, argv[i + 1], MAX_PATH_LEN - 1);
                 redir_in[MAX_PATH_LEN - 1] = '\0';
@@ -167,7 +248,6 @@ static int parse_redirections(int argc, char *argv[],
             }
         }
 
-        /* Keep this token */
         argv[new_argc++] = argv[i];
         i++;
     }
@@ -175,17 +255,15 @@ static int parse_redirections(int argc, char *argv[],
     return new_argc;
 }
 
-/*
- * Apply redirections in the current process.
- * Opens files and uses dup2() to redirect stdin/stdout.
- * Returns 0 on success, -1 on error.
- */
+/* ================================================================
+ * I/O redirection helpers
+ * ================================================================ */
+
 static int apply_redirections(const char *redir_out, int redir_out_mode,
                               const char *redir_in, int has_redir_in)
 {
     int fd;
 
-    /* Input redirection: < file */
     if (has_redir_in) {
         fd = open(redir_in, O_RDONLY);
         if (fd < 0) {
@@ -196,7 +274,6 @@ static int apply_redirections(const char *redir_out, int redir_out_mode,
         close(fd);
     }
 
-    /* Output redirection: > file (truncate) */
     if (redir_out_mode == REDIR_TRUNC) {
         fd = open(redir_out, O_WRONLY | O_CREAT | O_TRUNC);
         if (fd < 0) {
@@ -205,9 +282,7 @@ static int apply_redirections(const char *redir_out, int redir_out_mode,
         }
         dup2(fd, STDOUT_FILENO);
         close(fd);
-    }
-    /* Output redirection: >> file (append) */
-    else if (redir_out_mode == REDIR_APPEND) {
+    } else if (redir_out_mode == REDIR_APPEND) {
         fd = open(redir_out, O_WRONLY | O_CREAT | O_APPEND);
         if (fd < 0) {
             printf("sh: %s: Cannot open for appending\n", redir_out);
@@ -220,9 +295,10 @@ static int apply_redirections(const char *redir_out, int redir_out_mode,
     return 0;
 }
 
-/*
- * Built-in command: help
- */
+/* ================================================================
+ * Built-in commands
+ * ================================================================ */
+
 static void cmd_help(void)
 {
     puts("RISC-V Shell - Built-in commands:");
@@ -236,14 +312,14 @@ static void cmd_help(void)
     puts("");
     puts("Redirection: cmd > file, cmd >> file, cmd < file");
     puts("Pipes:       cmd1 | cmd2 [| cmd3 ...]  (up to 4 stages)");
+    puts("Background:  cmd &  (run without waiting)");
+    puts("Scripting:   sh scriptfile");
+    puts("Flow:        if/then/else/fi, while/do/done, for/in/do/done");
+    puts("Comments:    # at start of line");
     puts("Variables:   $VAR or ${VAR} are expanded in all arguments.");
     puts("PATH is used to locate commands (default: /bin).");
 }
 
-/*
- * Built-in command: echo
- * Writes to stdout (which may have been redirected via dup2).
- */
 static void cmd_echo(int argc, char *argv[])
 {
     int i;
@@ -254,9 +330,6 @@ static void cmd_echo(int argc, char *argv[])
     putchar('\n');
 }
 
-/*
- * Built-in command: unset VAR
- */
 static void cmd_unset(int argc, char *argv[])
 {
     int i;
@@ -267,17 +340,11 @@ static void cmd_unset(int argc, char *argv[])
     }
 }
 
-/*
- * Built-in command: set [VAR=value ...]
- * With no args: list all variables.
- * With args: set each VAR=value pair.
- */
 static void cmd_set(int argc, char *argv[])
 {
     int i;
 
     if (argc == 1) {
-        /* List all variables */
         int count = env_count();
         char buf[64];
         for (i = 0; i < count; i++) {
@@ -287,7 +354,6 @@ static void cmd_set(int argc, char *argv[])
         return;
     }
 
-    /* Set variables */
     for (i = 1; i < argc; i++) {
         char *eq = strchr(argv[i], '=');
         if (eq == (char *)0) {
@@ -300,10 +366,6 @@ static void cmd_set(int argc, char *argv[])
     }
 }
 
-/*
- * Built-in command: cd [dir]
- * Change current working directory (default: /).
- */
 static void cmd_cd(int argc, char *argv[])
 {
     const char *path = (argc > 1) ? argv[1] : "/";
@@ -312,37 +374,30 @@ static void cmd_cd(int argc, char *argv[])
     }
 }
 
-/*
- * Try to exec a command with PATH lookup.
- * Tries argv[0] directly if it contains '/', otherwise searches PATH.
- * Only returns if exec fails.
- */
+/* ================================================================
+ * External command execution
+ * ================================================================ */
+
 static void exec_with_path(char *argv[])
 {
     char path[MAX_PATH_LEN];
 
     if (strchr(argv[0], '/') != (char *)0) {
-        /* Path contains '/' — use as-is */
         exec(argv[0], argv);
-        /* exec() only returns on failure */
         printf("sh: %s: not found\n", argv[0]);
         return;
     }
 
-    /* Search PATH directories */
     char *path_var = getenv("PATH");
     if (path_var == (char *)0) {
         path_var = "/bin";
     }
 
-    /* Walk colon-separated PATH entries */
     const char *p = path_var;
     while (*p) {
-        /* Extract one directory from PATH */
         int dlen = 0;
         while (p[dlen] && p[dlen] != ':') dlen++;
 
-        /* Build "dir/cmd" path */
         if (dlen > 0 && dlen < (int)sizeof(path) - 2) {
             memcpy(path, p, dlen);
             path[dlen] = '/';
@@ -350,10 +405,8 @@ static void exec_with_path(char *argv[])
             path[sizeof(path) - 1] = '\0';
 
             exec(path, argv);
-            /* exec() only returns on failure — try next PATH entry */
         }
 
-        /* Advance past this entry */
         p += dlen;
         if (*p == ':') p++;
     }
@@ -361,18 +414,10 @@ static void exec_with_path(char *argv[])
     printf("sh: %s: command not found\n", argv[0]);
 }
 
-/*
- * Run an external program using fork()+exec()+wait().
- *
- * The shell forks a child process, which sets up any redirections,
- * then execs the command.
- *
- * The parent waits for the child to finish. The kernel sets $? in the
- * parent's environment when the child exits.
- */
 static void run_external(int argc, char *argv[],
                          const char *redir_out, int redir_out_mode,
-                         const char *redir_in, int has_redir_in)
+                         const char *redir_in, int has_redir_in,
+                         int background)
 {
     int pid;
 
@@ -385,36 +430,27 @@ static void run_external(int argc, char *argv[],
     }
 
     if (pid == 0) {
-        /* ---- Child process ---- */
-
-        /* Apply I/O redirections */
         if (apply_redirections(redir_out, redir_out_mode,
                                redir_in, has_redir_in) < 0) {
             exit(1);
         }
-
-        /* Exec the command */
         exec_with_path(argv);
         exit(127);
     }
 
-    /* ---- Parent process ---- */
-    wait();
-    /* $? is set by the kernel when the child exits */
+    if (background) {
+        printf("[%d]\n", pid);
+    } else {
+        wait();
+    }
 }
 
-/*
- * Run a multi-stage pipeline: cmd1 | cmd2 | ... | cmdN
- *
- * Creates N-1 pipes, forks N children, wires stdin/stdout between stages.
- * Each stage can have its own < or > redirections.
- * Parent waits for all children.
- */
 static void run_multi_pipeline(int n_stages, char **argv_s[],
                                 char rout_s[][MAX_PATH_LEN],
                                 int rout_mode_s[],
                                 char rin_s[][MAX_PATH_LEN],
-                                int has_rin_s[])
+                                int has_rin_s[],
+                                int background)
 {
     int pfd[2];
     int prev_read_fd = -1;
@@ -423,7 +459,6 @@ static void run_multi_pipeline(int n_stages, char **argv_s[],
 
     forked = 0;
     for (i = 0; i < n_stages; i++) {
-        /* Create pipe between this stage and the next (not for last stage) */
         if (i < n_stages - 1) {
             if (pipe(pfd) < 0) {
                 printf("sh: pipe failed\n");
@@ -442,22 +477,17 @@ static void run_multi_pipeline(int n_stages, char **argv_s[],
         }
 
         if (pid == 0) {
-            /* ---- Child process ---- */
-
-            /* Wire stdin from previous pipe's read end */
             if (prev_read_fd >= 0) {
                 dup2(prev_read_fd, STDIN_FILENO);
                 close(prev_read_fd);
             }
 
-            /* Wire stdout to current pipe's write end (not last stage) */
             if (i < n_stages - 1) {
-                close(pfd[0]);  /* Close read end (parent keeps it) */
+                close(pfd[0]);
                 dup2(pfd[1], STDOUT_FILENO);
                 close(pfd[1]);
             }
 
-            /* Apply per-stage redirections (may override pipe wiring) */
             if (apply_redirections(rout_s[i], rout_mode_s[i],
                                    rin_s[i], has_rin_s[i]) < 0) {
                 exit(1);
@@ -467,206 +497,677 @@ static void run_multi_pipeline(int n_stages, char **argv_s[],
             exit(127);
         }
 
-        /* ---- Parent process ---- */
         forked++;
 
-        /* Close previous read end (child inherited it) */
         if (prev_read_fd >= 0)
             close(prev_read_fd);
 
-        /* Keep read end for next stage, close write end */
         if (i < n_stages - 1) {
             close(pfd[1]);
             prev_read_fd = pfd[0];
         }
     }
 
-    /* Close any remaining pipe fd */
     if (prev_read_fd >= 0)
         close(prev_read_fd);
 
-    /* Wait for all forked children */
-    for (i = 0; i < forked; i++)
-        wait();
+    if (background) {
+        printf("[pipeline in background]\n");
+    } else {
+        for (i = 0; i < forked; i++)
+            wait();
+    }
 }
 
+/* ================================================================
+ * Flow control: block collection and execution
+ * ================================================================ */
 
-int main(int argc, char *argv[])
+/* Forward declaration — execute_line and execute_block are mutually recursive */
+static int execute_line(const char *raw_line);
+
+/*
+ * Collect lines from input until a terminator keyword at nesting depth 0.
+ * end1 is the primary terminator (e.g., "fi", "done").
+ * end2 is an optional secondary terminator (e.g., "else") or NULL.
+ * Returns: 1 = hit end1, 2 = hit end2, 0 = EOF/error, -1 = overflow.
+ * On return, buf contains the collected lines and *count is set.
+ */
+static int collect_block(char buf[][MAX_CMD_LEN], int *count, int max,
+                         const char *end1, const char *end2)
+{
+    int depth = 0;
+    char line[MAX_CMD_LEN];
+    *count = 0;
+
+    while (1) {
+        if (get_line(line, MAX_CMD_LEN) < 0) return 0;  /* EOF */
+
+        const char *trimmed = skip_ws(line);
+
+        /* Track nesting: if/while/for increase depth */
+        if (starts_with_keyword(trimmed, "if") ||
+            starts_with_keyword(trimmed, "while") ||
+            starts_with_keyword(trimmed, "for")) {
+            depth++;
+        }
+
+        /* Check terminators at depth 0 */
+        if (depth == 0) {
+            if (starts_with_keyword(trimmed, end1)) return 1;
+            if (end2 && starts_with_keyword(trimmed, end2)) return 2;
+        }
+
+        /* fi/done decrease depth */
+        if (starts_with_keyword(trimmed, "fi") ||
+            starts_with_keyword(trimmed, "done")) {
+            depth--;
+        }
+
+        /* Store line in block */
+        if (*count >= max) {
+            printf("sh: block too large (max %d lines)\n", max);
+            return -1;
+        }
+        strncpy(buf[*count], line, MAX_CMD_LEN - 1);
+        buf[*count][MAX_CMD_LEN - 1] = '\0';
+        (*count)++;
+    }
+}
+
+/*
+ * Collect lines from a pre-existing array (for nested flow control).
+ * Reads from lines[*idx] onwards, advancing *idx.
+ * Returns: 1 = hit end1, 2 = hit end2, 0 = ran out of lines, -1 = overflow.
+ */
+static int collect_block_from_array(char src[][MAX_CMD_LEN], int src_count, int *idx,
+                                    char buf[][MAX_CMD_LEN], int *count, int max,
+                                    const char *end1, const char *end2)
+{
+    int depth = 0;
+    *count = 0;
+
+    while (*idx < src_count) {
+        const char *trimmed = skip_ws(src[*idx]);
+
+        if (starts_with_keyword(trimmed, "if") ||
+            starts_with_keyword(trimmed, "while") ||
+            starts_with_keyword(trimmed, "for")) {
+            depth++;
+        }
+
+        if (depth == 0) {
+            if (starts_with_keyword(trimmed, end1)) { (*idx)++; return 1; }
+            if (end2 && starts_with_keyword(trimmed, end2)) { (*idx)++; return 2; }
+        }
+
+        if (starts_with_keyword(trimmed, "fi") ||
+            starts_with_keyword(trimmed, "done")) {
+            depth--;
+        }
+
+        if (*count >= max) {
+            printf("sh: block too large (max %d lines)\n", max);
+            return -1;
+        }
+        strncpy(buf[*count], src[*idx], MAX_CMD_LEN - 1);
+        buf[*count][MAX_CMD_LEN - 1] = '\0';
+        (*count)++;
+        (*idx)++;
+    }
+    return 0;
+}
+
+/*
+ * Execute an array of command lines, handling nested flow control.
+ */
+static void execute_block(char lines[][MAX_CMD_LEN], int count)
+{
+    int i = 0;
+
+    while (i < count) {
+        const char *trimmed = skip_ws(lines[i]);
+
+        /* Skip empty / comment lines */
+        if (*trimmed == '\0' || *trimmed == '#') { i++; continue; }
+
+        /* --- if/then/else/fi --- */
+        if (starts_with_keyword(trimmed, "if")) {
+            /* Execute the condition (rest of line after "if ") */
+            const char *cond = trimmed + 2;
+            while (*cond == ' ' || *cond == '\t') cond++;
+            if (*cond) execute_line(cond);
+            char *exitcode = getenv("?");
+            int cond_ok = (exitcode && exitcode[0] == '0' && exitcode[1] == '\0');
+
+            i++;  /* past 'if' line */
+
+            /* Expect 'then' */
+            if (i < count && starts_with_keyword(skip_ws(lines[i]), "then")) {
+                i++;  /* past 'then' */
+            } else {
+                printf("sh: expected 'then'\n");
+                continue;
+            }
+
+            /* Collect then-block */
+            char then_block[MAX_BLOCK_LINES][MAX_CMD_LEN];
+            int then_count = 0;
+            int r = collect_block_from_array(lines, count, &i,
+                                             then_block, &then_count, MAX_BLOCK_LINES,
+                                             "fi", "else");
+            if (r == 2) {
+                /* Hit 'else' — collect else-block */
+                char else_block[MAX_BLOCK_LINES][MAX_CMD_LEN];
+                int else_count = 0;
+                collect_block_from_array(lines, count, &i,
+                                         else_block, &else_count, MAX_BLOCK_LINES,
+                                         "fi", (char *)0);
+                if (cond_ok)
+                    execute_block(then_block, then_count);
+                else
+                    execute_block(else_block, else_count);
+            } else {
+                /* Hit 'fi' directly */
+                if (cond_ok)
+                    execute_block(then_block, then_count);
+            }
+            continue;
+        }
+
+        /* --- while/do/done --- */
+        if (starts_with_keyword(trimmed, "while")) {
+            const char *cond = trimmed + 5;
+            while (*cond == ' ' || *cond == '\t') cond++;
+            char cond_str[MAX_CMD_LEN];
+            strncpy(cond_str, cond, MAX_CMD_LEN - 1);
+            cond_str[MAX_CMD_LEN - 1] = '\0';
+
+            i++;  /* past 'while' line */
+
+            /* Expect 'do' */
+            if (i < count && starts_with_keyword(skip_ws(lines[i]), "do")) {
+                i++;  /* past 'do' */
+            } else {
+                printf("sh: expected 'do'\n");
+                continue;
+            }
+
+            /* Collect body */
+            char body[MAX_BLOCK_LINES][MAX_CMD_LEN];
+            int body_count = 0;
+            int save_i = i;
+            collect_block_from_array(lines, count, &i,
+                                     body, &body_count, MAX_BLOCK_LINES,
+                                     "done", (char *)0);
+
+            /* Loop */
+            while (1) {
+                execute_line(cond_str);
+                char *exitcode = getenv("?");
+                if (!(exitcode && exitcode[0] == '0' && exitcode[1] == '\0'))
+                    break;
+                execute_block(body, body_count);
+            }
+            continue;
+        }
+
+        /* --- for/in/do/done --- */
+        if (starts_with_keyword(trimmed, "for")) {
+            /* Parse: for VAR in arg1 arg2 ... */
+            char for_line[MAX_CMD_LEN];
+            strncpy(for_line, trimmed, MAX_CMD_LEN - 1);
+            for_line[MAX_CMD_LEN - 1] = '\0';
+
+            char *for_argv[MAX_ARGS];
+            int for_argc = parse_cmd(for_line + 3, for_argv, MAX_ARGS);  /* skip "for" */
+
+            if (for_argc < 3 || strcmp(for_argv[1], "in") != 0) {
+                printf("sh: usage: for VAR in args...\n");
+                i++;
+                continue;
+            }
+
+            char varname[32];
+            strncpy(varname, for_argv[0], sizeof(varname) - 1);
+            varname[sizeof(varname) - 1] = '\0';
+
+            /* Collect the word list before parse_cmd destroys for_line */
+            char words[MAX_ARGS][MAX_CMD_LEN];
+            int nwords = 0;
+            int w;
+            for (w = 2; w < for_argc && nwords < MAX_ARGS; w++) {
+                strncpy(words[nwords], for_argv[w], MAX_CMD_LEN - 1);
+                words[nwords][MAX_CMD_LEN - 1] = '\0';
+                nwords++;
+            }
+
+            i++;  /* past 'for' line */
+
+            /* Expect 'do' */
+            if (i < count && starts_with_keyword(skip_ws(lines[i]), "do")) {
+                i++;  /* past 'do' */
+            } else {
+                printf("sh: expected 'do'\n");
+                continue;
+            }
+
+            /* Collect body */
+            char body[MAX_BLOCK_LINES][MAX_CMD_LEN];
+            int body_count = 0;
+            collect_block_from_array(lines, count, &i,
+                                     body, &body_count, MAX_BLOCK_LINES,
+                                     "done", (char *)0);
+
+            /* Iterate */
+            for (w = 0; w < nwords; w++) {
+                setenv(varname, words[w]);
+                execute_block(body, body_count);
+            }
+            continue;
+        }
+
+        /* Regular line */
+        execute_line(lines[i]);
+        i++;
+    }
+}
+
+/* ================================================================
+ * Top-level flow control handlers (read from input, not array)
+ * ================================================================ */
+
+/*
+ * Handle 'if' at top level — reads then/else/fi from input.
+ * 'cond' is the condition command (text after "if ").
+ */
+static void handle_if(const char *cond)
 {
     char line[MAX_CMD_LEN];
+    int r;
+
+    /* Execute condition */
+    if (*cond) execute_line(cond);
+    char *exitcode = getenv("?");
+    int cond_ok = (exitcode && exitcode[0] == '0' && exitcode[1] == '\0');
+
+    /* Expect 'then' */
+    if (get_line(line, MAX_CMD_LEN) < 0 || !starts_with_keyword(skip_ws(line), "then")) {
+        printf("sh: expected 'then'\n");
+        return;
+    }
+
+    /* Collect then-block */
+    char then_block[MAX_BLOCK_LINES][MAX_CMD_LEN];
+    int then_count = 0;
+    r = collect_block(then_block, &then_count, MAX_BLOCK_LINES, "fi", "else");
+
+    if (r == 2) {
+        /* Hit 'else' — collect else-block */
+        char else_block[MAX_BLOCK_LINES][MAX_CMD_LEN];
+        int else_count = 0;
+        collect_block(else_block, &else_count, MAX_BLOCK_LINES, "fi", (char *)0);
+        if (cond_ok)
+            execute_block(then_block, then_count);
+        else
+            execute_block(else_block, else_count);
+    } else if (r == 1) {
+        /* Hit 'fi' directly */
+        if (cond_ok)
+            execute_block(then_block, then_count);
+    } else {
+        printf("sh: unexpected end of input in 'if'\n");
+    }
+}
+
+/*
+ * Handle 'while' at top level.
+ * 'cond' is the condition command (text after "while ").
+ */
+static void handle_while(const char *cond)
+{
+    char line[MAX_CMD_LEN];
+    char cond_str[MAX_CMD_LEN];
+    strncpy(cond_str, cond, MAX_CMD_LEN - 1);
+    cond_str[MAX_CMD_LEN - 1] = '\0';
+
+    /* Expect 'do' */
+    if (get_line(line, MAX_CMD_LEN) < 0 || !starts_with_keyword(skip_ws(line), "do")) {
+        printf("sh: expected 'do'\n");
+        return;
+    }
+
+    /* Collect body */
+    char body[MAX_BLOCK_LINES][MAX_CMD_LEN];
+    int body_count = 0;
+    int r = collect_block(body, &body_count, MAX_BLOCK_LINES, "done", (char *)0);
+    if (r != 1) {
+        printf("sh: unexpected end of input in 'while'\n");
+        return;
+    }
+
+    /* Loop */
+    while (1) {
+        execute_line(cond_str);
+        char *exitcode = getenv("?");
+        if (!(exitcode && exitcode[0] == '0' && exitcode[1] == '\0'))
+            break;
+        execute_block(body, body_count);
+    }
+}
+
+/*
+ * Handle 'for' at top level.
+ * 'rest' is everything after "for " (e.g., "x in a b c").
+ */
+static void handle_for(const char *rest)
+{
+    char line[MAX_CMD_LEN];
+    char rest_buf[MAX_CMD_LEN];
+    strncpy(rest_buf, rest, MAX_CMD_LEN - 1);
+    rest_buf[MAX_CMD_LEN - 1] = '\0';
+
+    char *for_argv[MAX_ARGS];
+    int for_argc = parse_cmd(rest_buf, for_argv, MAX_ARGS);
+
+    if (for_argc < 3 || strcmp(for_argv[1], "in") != 0) {
+        printf("sh: usage: for VAR in args...\n");
+        return;
+    }
+
+    char varname[32];
+    strncpy(varname, for_argv[0], sizeof(varname) - 1);
+    varname[sizeof(varname) - 1] = '\0';
+
+    /* Save word list before parse_cmd corrupts rest_buf */
+    char words[MAX_ARGS][MAX_CMD_LEN];
+    int nwords = 0;
+    int w;
+    for (w = 2; w < for_argc && nwords < MAX_ARGS; w++) {
+        strncpy(words[nwords], for_argv[w], MAX_CMD_LEN - 1);
+        words[nwords][MAX_CMD_LEN - 1] = '\0';
+        nwords++;
+    }
+
+    /* Expect 'do' */
+    if (get_line(line, MAX_CMD_LEN) < 0 || !starts_with_keyword(skip_ws(line), "do")) {
+        printf("sh: expected 'do'\n");
+        return;
+    }
+
+    /* Collect body */
+    char body[MAX_BLOCK_LINES][MAX_CMD_LEN];
+    int body_count = 0;
+    int r = collect_block(body, &body_count, MAX_BLOCK_LINES, "done", (char *)0);
+    if (r != 1) {
+        printf("sh: unexpected end of input in 'for'\n");
+        return;
+    }
+
+    /* Iterate */
+    for (w = 0; w < nwords; w++) {
+        setenv(varname, words[w]);
+        execute_block(body, body_count);
+    }
+}
+
+/* ================================================================
+ * Core command dispatch — execute a single command line
+ * ================================================================ */
+
+/*
+ * Execute a single command line.
+ * Handles variable expansion, pipes, redirections, built-ins, externals.
+ * Returns 0 normally, -1 if 'exit' was invoked.
+ */
+static int execute_line(const char *raw_line)
+{
     char expanded[MAX_CMD_LEN];
     char *cmd_argv[MAX_ARGS];
     int cmd_argc;
-
-    /* Redirection state */
     char redir_out[MAX_PATH_LEN];
     char redir_in[MAX_PATH_LEN];
     int redir_out_mode;
     int has_redir_in;
+
+    const char *trimmed = skip_ws(raw_line);
+
+    /* Skip empty / comment lines */
+    if (*trimmed == '\0' || *trimmed == '#') return 0;
+
+    /* Expand $VAR references */
+    expand_vars(trimmed, expanded, MAX_CMD_LEN);
+
+    /* --- Flow control keywords --- */
+    if (starts_with_keyword(expanded, "if")) {
+        const char *cond = expanded + 2;
+        while (*cond == ' ' || *cond == '\t') cond++;
+        handle_if(cond);
+        return 0;
+    }
+    if (starts_with_keyword(expanded, "while")) {
+        const char *cond = expanded + 5;
+        while (*cond == ' ' || *cond == '\t') cond++;
+        handle_while(cond);
+        return 0;
+    }
+    if (starts_with_keyword(expanded, "for")) {
+        const char *rest = expanded + 3;
+        while (*rest == ' ' || *rest == '\t') rest++;
+        handle_for(rest);
+        return 0;
+    }
+
+    /* --- Pipe handling --- */
+    if (strchr(expanded, '|') != (char *)0) {
+        char seg_bufs[MAX_PIPE_STAGES][MAX_CMD_LEN];
+        char *seg_argv[MAX_PIPE_STAGES][MAX_ARGS];
+        int seg_argc[MAX_PIPE_STAGES];
+        char seg_rout[MAX_PIPE_STAGES][MAX_PATH_LEN];
+        char seg_rin[MAX_PIPE_STAGES][MAX_PATH_LEN];
+        int seg_rout_mode[MAX_PIPE_STAGES];
+        int seg_has_rin[MAX_PIPE_STAGES];
+        int n_stages = 0;
+        int ok = 1;
+
+        {
+            char *p = expanded;
+            char *seg_start = expanded;
+            while (1) {
+                if (*p == '|' || *p == '\0') {
+                    int seg_len = p - seg_start;
+                    if (n_stages >= MAX_PIPE_STAGES) {
+                        printf("sh: too many pipe stages (max %d)\n",
+                               MAX_PIPE_STAGES);
+                        ok = 0;
+                        break;
+                    }
+                    memcpy(seg_bufs[n_stages], seg_start, seg_len);
+                    seg_bufs[n_stages][seg_len] = '\0';
+                    n_stages++;
+                    if (*p == '\0') break;
+                    seg_start = p + 1;
+                }
+                p++;
+            }
+        }
+
+        if (!ok || n_stages < 2) {
+            if (ok) printf("sh: empty pipeline\n");
+            return 0;
+        }
+
+        int pipe_bg = 0;
+        {
+            int s;
+            for (s = 0; s < n_stages; s++) {
+                seg_argc[s] = parse_cmd(seg_bufs[s], seg_argv[s], MAX_ARGS);
+                if (seg_argc[s] == 0) { ok = 0; break; }
+                seg_argc[s] = parse_redirections(seg_argc[s], seg_argv[s],
+                                                 seg_rout[s], &seg_rout_mode[s],
+                                                 seg_rin[s], &seg_has_rin[s]);
+                if (seg_argc[s] == 0) { ok = 0; break; }
+            }
+            if (ok && n_stages > 0) {
+                int last = n_stages - 1;
+                if (seg_argc[last] > 0 &&
+                    strcmp(seg_argv[last][seg_argc[last] - 1], "&") == 0) {
+                    pipe_bg = 1;
+                    seg_argv[last][--seg_argc[last]] = (char *)0;
+                    if (seg_argc[last] == 0) { ok = 0; }
+                }
+            }
+        }
+        if (!ok) return 0;
+
+        {
+            int s;
+            char **argv_arr[MAX_PIPE_STAGES];
+            for (s = 0; s < n_stages; s++)
+                argv_arr[s] = seg_argv[s];
+            run_multi_pipeline(n_stages, argv_arr,
+                               seg_rout, seg_rout_mode,
+                               seg_rin, seg_has_rin,
+                               pipe_bg);
+        }
+        return 0;
+    }
+
+    /* --- Single command --- */
+    cmd_argc = parse_cmd(expanded, cmd_argv, MAX_ARGS);
+    if (cmd_argc == 0) return 0;
+
+    /* Check for trailing '&' — background execution */
+    int background = 0;
+    if (cmd_argc > 0 && strcmp(cmd_argv[cmd_argc - 1], "&") == 0) {
+        background = 1;
+        cmd_argv[--cmd_argc] = (char *)0;
+    }
+    if (cmd_argc == 0) return 0;
+
+    /* Extract redirections from argv */
+    cmd_argc = parse_redirections(cmd_argc, cmd_argv,
+                                  redir_out, &redir_out_mode,
+                                  redir_in, &has_redir_in);
+    if (cmd_argc == 0) return 0;
+
+    /* --- Built-in commands --- */
+    if (strcmp(cmd_argv[0], "help") == 0) {
+        cmd_help();
+    } else if (strcmp(cmd_argv[0], "exit") == 0) {
+        int code = 0;
+        if (cmd_argc > 1) {
+            int parsed = atoi(cmd_argv[1]);
+            if (parsed >= 0) code = parsed;
+        }
+        exit(code);
+        /* Not reached */
+    } else if (strcmp(cmd_argv[0], "echo") == 0) {
+        /* echo supports redirection via save/redirect/restore */
+        if (redir_out_mode != REDIR_NONE || has_redir_in) {
+            int saved_stdout = -1;
+            int saved_stdin = -1;
+
+            if (redir_out_mode != REDIR_NONE) {
+                saved_stdout = dup(STDOUT_FILENO);
+            }
+            if (has_redir_in) {
+                saved_stdin = dup(STDIN_FILENO);
+            }
+
+            if (apply_redirections(redir_out, redir_out_mode,
+                                   redir_in, has_redir_in) < 0) {
+                if (saved_stdout >= 0) {
+                    dup2(saved_stdout, STDOUT_FILENO);
+                    close(saved_stdout);
+                }
+                if (saved_stdin >= 0) {
+                    dup2(saved_stdin, STDIN_FILENO);
+                    close(saved_stdin);
+                }
+                return 0;
+            }
+
+            cmd_echo(cmd_argc, cmd_argv);
+
+            if (saved_stdout >= 0) {
+                dup2(saved_stdout, STDOUT_FILENO);
+                close(saved_stdout);
+            }
+            if (saved_stdin >= 0) {
+                dup2(saved_stdin, STDIN_FILENO);
+                close(saved_stdin);
+            }
+        } else {
+            cmd_echo(cmd_argc, cmd_argv);
+        }
+    } else if (strcmp(cmd_argv[0], "set") == 0) {
+        cmd_set(cmd_argc, cmd_argv);
+    } else if (strcmp(cmd_argv[0], "unset") == 0) {
+        cmd_unset(cmd_argc, cmd_argv);
+    } else if (strcmp(cmd_argv[0], "cd") == 0) {
+        cmd_cd(cmd_argc, cmd_argv);
+    } else {
+        /* External program */
+        run_external(cmd_argc, cmd_argv,
+                     redir_out, redir_out_mode,
+                     redir_in, has_redir_in,
+                     background);
+    }
+
+    return 0;
+}
+
+/* ================================================================
+ * Main
+ * ================================================================ */
+
+int main(int argc, char *argv[])
+{
+    char line[MAX_CMD_LEN];
 
     /* Set default environment if PATH is not already set */
     if (getenv("PATH") == (char *)0) {
         setenv("PATH", "/bin");
     }
 
+    /* Check for script argument: sh scriptfile */
+    if (argc >= 2) {
+        script_fd = open(argv[1], O_RDONLY);
+        if (script_fd < 0) {
+            printf("sh: %s: cannot open\n", argv[1]);
+            return 1;
+        }
+        non_interactive = 1;
+    }
+
+    /* Source /etc/rc on boot (interactive mode only) */
+    if (!non_interactive) {
+        int rc_fd = open("/etc/rc", O_RDONLY);
+        if (rc_fd >= 0) {
+            script_fd = rc_fd;
+            /* Run command loop in script mode; will switch to interactive on EOF */
+            while (get_line(line, MAX_CMD_LEN) == 0) {
+                execute_line(line);
+            }
+            close(script_fd);
+            script_fd = -1;
+        }
+    }
+
+    /* Main command loop */
     for (;;) {
-        char *cwd = getenv("CWD");
-        if (cwd) write(STDOUT_FILENO, cwd, strlen(cwd));
-        write(STDOUT_FILENO, "$ ", 2);
-        gets(line, MAX_CMD_LEN);
-
-        /* Skip empty lines */
-        if (line[0] == '\0') continue;
-
-        /* Expand $VAR references */
-        expand_vars(line, expanded, MAX_CMD_LEN);
-
-        /* Check for pipe operator BEFORE tokenizing (spaces matter) */
-        if (strchr(expanded, '|') != (char *)0) {
-            /* Split expanded into pipe-separated segments */
-            char seg_bufs[MAX_PIPE_STAGES][MAX_CMD_LEN];
-            char *seg_argv[MAX_PIPE_STAGES][MAX_ARGS];
-            int seg_argc[MAX_PIPE_STAGES];
-            char seg_rout[MAX_PIPE_STAGES][MAX_PATH_LEN];
-            char seg_rin[MAX_PIPE_STAGES][MAX_PATH_LEN];
-            int seg_rout_mode[MAX_PIPE_STAGES];
-            int seg_has_rin[MAX_PIPE_STAGES];
-            int n_stages = 0;
-            int ok = 1;
-
-            /* Walk expanded string, splitting on '|' */
-            {
-                char *p = expanded;
-                char *seg_start = expanded;
-                while (1) {
-                    if (*p == '|' || *p == '\0') {
-                        int seg_len = p - seg_start;
-                        if (n_stages >= MAX_PIPE_STAGES) {
-                            printf("sh: too many pipe stages (max %d)\n",
-                                   MAX_PIPE_STAGES);
-                            ok = 0;
-                            break;
-                        }
-                        memcpy(seg_bufs[n_stages], seg_start, seg_len);
-                        seg_bufs[n_stages][seg_len] = '\0';
-                        n_stages++;
-                        if (*p == '\0') break;
-                        seg_start = p + 1;
-                    }
-                    p++;
-                }
+        if (get_line(line, MAX_CMD_LEN) < 0) {
+            /* EOF */
+            if (non_interactive) {
+                if (script_fd >= 0) close(script_fd);
+                return 0;
             }
-
-            if (!ok || n_stages < 2) {
-                if (ok) printf("sh: empty pipeline\n");
-                continue;
-            }
-
-            /* Parse each segment */
-            {
-                int s;
-                for (s = 0; s < n_stages; s++) {
-                    seg_argc[s] = parse_cmd(seg_bufs[s], seg_argv[s], MAX_ARGS);
-                    if (seg_argc[s] == 0) { ok = 0; break; }
-                    seg_argc[s] = parse_redirections(seg_argc[s], seg_argv[s],
-                                                     seg_rout[s], &seg_rout_mode[s],
-                                                     seg_rin[s], &seg_has_rin[s]);
-                    if (seg_argc[s] == 0) { ok = 0; break; }
-                }
-            }
-            if (!ok) continue;
-
-            /* Build argv pointer array for run_multi_pipeline */
-            {
-                int s;
-                char **argv_arr[MAX_PIPE_STAGES];
-                for (s = 0; s < n_stages; s++)
-                    argv_arr[s] = seg_argv[s];
-                run_multi_pipeline(n_stages, argv_arr,
-                                   seg_rout, seg_rout_mode,
-                                   seg_rin, seg_has_rin);
-            }
-            continue;
+            /* Interactive EOF — shouldn't happen with console, but handle it */
+            break;
         }
 
-        /* No pipe — parse as single command */
-        cmd_argc = parse_cmd(expanded, cmd_argv, MAX_ARGS);
-        if (cmd_argc == 0) continue;
-
-        /* Extract redirections from argv */
-        cmd_argc = parse_redirections(cmd_argc, cmd_argv,
-                                      redir_out, &redir_out_mode,
-                                      redir_in, &has_redir_in);
-        if (cmd_argc == 0) continue;
-
-        /* Check built-in commands */
-        if (strcmp(cmd_argv[0], "help") == 0) {
-            cmd_help();
-        } else if (strcmp(cmd_argv[0], "exit") == 0) {
-            int code = 0;
-            if (cmd_argc > 1) {
-                int parsed = atoi(cmd_argv[1]);
-                if (parsed >= 0) code = parsed;
-            }
-            exit(code);
-        } else if (strcmp(cmd_argv[0], "echo") == 0) {
-            /* echo supports redirection via save/redirect/restore */
-            if (redir_out_mode != REDIR_NONE || has_redir_in) {
-                int saved_stdout = -1;
-                int saved_stdin = -1;
-
-                /* Save current stdout if redirecting output */
-                if (redir_out_mode != REDIR_NONE) {
-                    saved_stdout = dup(STDOUT_FILENO);
-                }
-                /* Save current stdin if redirecting input */
-                if (has_redir_in) {
-                    saved_stdin = dup(STDIN_FILENO);
-                }
-
-                /* Apply redirections */
-                if (apply_redirections(redir_out, redir_out_mode,
-                                       redir_in, has_redir_in) < 0) {
-                    /* Restore on error */
-                    if (saved_stdout >= 0) {
-                        dup2(saved_stdout, STDOUT_FILENO);
-                        close(saved_stdout);
-                    }
-                    if (saved_stdin >= 0) {
-                        dup2(saved_stdin, STDIN_FILENO);
-                        close(saved_stdin);
-                    }
-                    continue;
-                }
-
-                /* Run built-in */
-                cmd_echo(cmd_argc, cmd_argv);
-
-                /* Restore stdout */
-                if (saved_stdout >= 0) {
-                    dup2(saved_stdout, STDOUT_FILENO);
-                    close(saved_stdout);
-                }
-                /* Restore stdin */
-                if (saved_stdin >= 0) {
-                    dup2(saved_stdin, STDIN_FILENO);
-                    close(saved_stdin);
-                }
-            } else {
-                cmd_echo(cmd_argc, cmd_argv);
-            }
-        } else if (strcmp(cmd_argv[0], "set") == 0) {
-            cmd_set(cmd_argc, cmd_argv);
-        } else if (strcmp(cmd_argv[0], "unset") == 0) {
-            cmd_unset(cmd_argc, cmd_argv);
-        } else if (strcmp(cmd_argv[0], "cd") == 0) {
-            cmd_cd(cmd_argc, cmd_argv);
-        } else {
-            /* Try external program */
-            run_external(cmd_argc, cmd_argv,
-                         redir_out, redir_out_mode,
-                         redir_in, has_redir_in);
-        }
+        execute_line(line);
     }
 
     return 0;

@@ -26,6 +26,7 @@
 #define SLEEP_WAIT    2   /* wait(): waiting for any child to exit */
 #define SLEEP_TIMER   3   /* future: sleep(n) — waiting for timer */
 #define SLEEP_IO      4   /* future: blocking read — waiting for input */
+#define SLEEP_SEM     5   /* Blocked on semaphore wait */
 
 /* Process table limits */
 #define MAX_PROCS       8
@@ -53,6 +54,8 @@ struct process {
     struct fd_entry  fds[MAX_FD];  /* Per-process file descriptors */
     char             env[MAX_ENVC][MAX_ENV_LEN];  /* Per-process environment */
     int              env_count;                     /* Number of env entries */
+    uint8_t          shm_attached;  /* Bitmap: which SHM segments this process has attached */
+    uint8_t          sem_attached;  /* Bitmap: which semaphores this process holds */
 };
 
 /* Global process table and current process index */

@@ -62,6 +62,8 @@ Key modules organized by directory:
 | Trap Handling | `trap.S`, `trap.h` | Assembly trap handler, context save/restore |
 | Process Mgmt | `process.c/h` | Process table, slot allocation, per-process state |
 | Pipes | `pipe.c/h` | Kernel-buffered IPC pipes with reference counting |
+| Shared Memory | `shm.c/h` | Fixed-size (4KB) shared memory segments, key-based API |
+| Semaphores | `sem.c/h` | Counting semaphores with ecall-retry blocking |
 | System Calls | `syscall.c/h`, `syscall_nr.h` | Syscall dispatch, per-process file descriptors |
 | ELF Loader | `loader.c/h`, `loader_asm.S`, `elf.h` | Load ELF programs at arbitrary addresses |
 | Kernel Entry | `crt0.S`, `kernel.lds` | Kernel entry point (in RAM), kernel linker script |
@@ -88,6 +90,7 @@ Key modules organized by directory:
   - Slot 1: 0x00118000-0x0011FFFF
   - ...
   - Slot 7: 0x00148000-0x0014FFFF
+- 0x00150000-0x00157FFF: Shared memory segments (8 × 4KB)
 - 0x001F0000-0x001FEFFF: Bootloader BSS (60KB, used only during boot)
 - 0x001FFFFC: Initial stack pointer (shared by bootloader and kernel)
 - 0x00200000: Block device MMIO
@@ -185,6 +188,13 @@ User programs communicate with the kernel via the `ecall` instruction. The sysca
 | 26 | sys_stat | a0=path, a1=statbuf | Get file metadata (inode, size, type, link_count) |
 | 27 | sys_kill | a0=pid | Terminate a process by PID |
 | 28 | sys_ps | a0=buf, a1=maxprocs | List active processes into struct proc_info array |
+| 29 | sys_shmget | a0=key, a1=flags | Get/create shared memory segment; returns segment ID |
+| 30 | sys_shmat | a0=shm_id | Attach to shared memory; returns physical address |
+| 31 | sys_shmdt | a0=shm_id | Detach from shared memory |
+| 32 | sys_semget | a0=key, a1=value, a2=flags | Get/create semaphore; returns semaphore ID |
+| 33 | sys_semwait | a0=sem_id | Wait (decrement) semaphore; blocks if 0 |
+| 34 | sys_sempost | a0=sem_id | Post (increment) semaphore; wakes blocked waiters |
+| 35 | sys_semclose | a0=sem_id | Close semaphore handle |
 
 **Pre-opened file descriptors:**
 - fd 0: stdin (console device)
@@ -208,6 +218,7 @@ Each program runs in its own fixed 32KB memory slot with a per-process trap fram
 - `SLEEP_WAIT` (2) — parent waiting in wait()
 - `SLEEP_TIMER` (3) — reserved for future use
 - `SLEEP_IO` (4) — blocked on pipe read/write
+- `SLEEP_SEM` (5) — blocked on semaphore wait
 
 **fork() semantics:** `fork()` copies the parent's entire 32KB memory slot to a new slot, duplicates all file descriptors (incrementing pipe reference counts), copies the environment, and adjusts the child's registers by the memory offset delta. Returns child PID to parent, 0 to child.
 
@@ -247,6 +258,7 @@ The user library provides:
 - **Environment**: `setenv()`, `unsetenv()`, `env_count()`, `getenv()`, `getenv_r()`, `getenv_entry()`, `env_to_envp()`
 - **String functions**: `strlen()`, `strcmp()`, `strncmp()`, `strcpy()`, `strncpy()`, `strchr()`, `atoi()`
 - **Memory functions**: `memset()`, `memcpy()`, `memcmp()`
+- **IPC functions**: `shmget()`, `shmat()`, `shmdt()`, `semget()`, `semwait()`, `sempost()`, `semclose()`
 
 Build produces user programs that are added to the filesystem image:
 - `/bin/hello` — Hello world demo
@@ -270,10 +282,17 @@ Build produces user programs that are added to the filesystem image:
 - `/bin/ps` — List active processes (PID, state, parent PID, program name)
 - `/bin/kill` — Terminate a process by PID
 - `/bin/ed` — Minimal line editor (o=open, p=print, `<n>i`=insert before, `<n>a`=append after, `<n>d`=delete, w=write, q=quit; end text input with `.` on a new line)
+- `/bin/shm_test` — Shared memory tests (create, attach, fork sharing, IPC_EXCL, key reuse)
+- `/bin/sem_test` — Semaphore tests (create, counting, blocking wait/post with fork, mutex pattern)
+- `/bin/fs_test` — Filesystem tests (create/read/write, append, truncate, stat, mkdir/rmdir/readdir, chdir, open errors)
+- `/bin/proc_test` — Process tests (fork, multi-wait, exec errors, getpid, kill, ps, env isolation, slot exhaustion)
+- `/bin/stress_test` — Stress tests (many files, large file, pipe/fd/shm/sem exhaustion, nested dirs, fork+pipe)
+- `/bin/link_test` — Hard link and rename tests (link/unlink, link count, rename within/across dirs, error cases)
+- `/bin/script_test` — Shell script tests (echo, comments, if/then/else, for loop, variables, external commands)
 
-## Interactive Shell
+## Shell
 
-After the bootloader loads the kernel and the kernel initializes, it loads `/bin/sh` from the filesystem into process slot 0. Available commands:
+After the bootloader loads the kernel and the kernel initializes, it loads `/bin/sh` from the filesystem into process slot 0. On startup, the shell sources `/etc/rc` if it exists (silently skipped if missing), then enters interactive mode. Available commands:
 
 ```bash
 $ help                  # Show available commands
@@ -305,6 +324,31 @@ $ cat < /tmp/in.txt > /tmp/out.txt  # Combined input + output redirection
 $ echo hello | cat               # Pipe stdout of left to stdin of right
 $ ls /bin | cat                   # Pipe directory listing through cat
 $ echo hello | cat | cat          # Multi-stage pipeline (up to 4 stages)
+
+# Background execution
+$ hello &                        # Run in background, shell returns immediately
+$ ls /bin | cat &                # Pipeline in background
+
+# Scripting
+$ sh /etc/rc                     # Run a script file
+
+# Flow control (works interactively and in scripts)
+if ls /bin
+then
+  echo bin exists
+else
+  echo no bin
+fi
+
+while ls /tmp/flag
+do
+  echo waiting...
+done
+
+for f in hello ls cat
+do
+  echo program: $f
+done
 ```
 
 The shell supports:
@@ -317,6 +361,11 @@ The shell supports:
 - Running external programs via `fork()`+`exec()`+`wait()` (Unix-style process creation)
 - I/O redirection: `>` (truncate), `>>` (append), `<` (input) — operators must be space-separated
 - Pipes: `cmd1 | cmd2 [| cmd3 ...]` — multi-stage pipeline (up to 4 stages) connecting stdout to stdin via kernel pipes
+- Background execution: `cmd &` — fork+exec without waiting, prints PID; also works with pipelines
+- Script execution: `sh scriptfile` — runs commands from a file then exits; `/etc/rc` auto-sourced on boot
+- Comments: lines starting with `#` are skipped
+- Flow control: `if cmd; then ... [else ...] fi`, `while cmd; do ... done`, `for var in args; do ... done`
+- Nested flow control supported; block body buffered (max 16 lines per block)
 - Built-in `echo` supports redirection (save/redirect/restore pattern); other built-ins do not
 - Exit status tracking (`$?` holds last program's exit code)
 - Automatic shell restart after `exit` command

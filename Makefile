@@ -73,13 +73,13 @@ KERNEL_OBJS = kernel/crt0.o kernel/string.o kernel/console.o kernel/block.o \
               kernel/inode.o kernel/dir.o kernel/file.o kernel/fs.o \
               kernel/device.o kernel/console_dev.o kernel/loader.o \
               kernel/loader_asm.o kernel/trap.o kernel/process.o \
-              kernel/pipe.o kernel/syscall.o kernel/main.o
+              kernel/pipe.o kernel/shm.o kernel/sem.o kernel/syscall.o kernel/main.o
 
 KERNEL_HEADERS = kernel/fs.h kernel/types.h kernel/fs_types.h kernel/string.h \
                  kernel/console.h kernel/block.h kernel/inode.h kernel/dir.h \
                  kernel/file.h kernel/device.h kernel/console_dev.h kernel/elf.h \
                  kernel/loader.h kernel/trap.h kernel/syscall.h kernel/process.h \
-                 kernel/pipe.h
+                 kernel/pipe.h kernel/shm.h kernel/sem.h
 
 kernel/%.o: kernel/%.c $(KERNEL_HEADERS)
 	$(RISCV_TOOL_PREFIX)gcc $(RISCV_CFLAGS) -Ikernel -c $< -o $@
@@ -118,7 +118,8 @@ user/%.user.o: user/%.S kernel/syscall_nr.h
 # The source file must be user/<name>.c
 USER_PROGS = hello spawn_demo shell ls mkdir rmdir mknod env_demo cat \
              fork_demo pipe_demo pipe_test redir_test fd_test \
-             rm mv ln cp ps kill ed
+             rm mv ln cp ps kill ed shm_test sem_test \
+             fs_test proc_test stress_test link_test script_test
 
 # Derive ELF list and object file list from USER_PROGS
 USER_ELFS = $(patsubst %,$(BUILD_DIR)/%.elf,$(USER_PROGS))
@@ -194,6 +195,8 @@ fs-image: $(FSTOOL_BIN) $(BUILD_DIR)/kernel.bin $(USER_ELFS) | $(BUILD_DIR)
 		fi; \
 	done
 	$(FSTOOL_BIN) add block_storage.bin /etc/hello.txt hello.txt
+	$(FSTOOL_BIN) add block_storage.bin /etc/rc rc
+	$(FSTOOL_BIN) add block_storage.bin /etc/test.sh test.sh
 	@echo "Filesystem image created."
 
 # ====================================

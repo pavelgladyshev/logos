@@ -171,6 +171,52 @@ int kill(int pid);
 int ps(struct proc_info *buf, int max_entries);
 
 /*
+ * IPC: Shared Memory
+ *
+ * 8 fixed-size (4KB) shared memory segments, accessed by key.
+ * No MMU — shmat returns the physical address directly.
+ */
+
+/* Shared memory / semaphore flags */
+#define IPC_CREAT   0x100
+#define IPC_EXCL    0x200
+
+/* Get/create a shared memory segment by key.
+ * flags: IPC_CREAT to create, IPC_EXCL to fail if exists.
+ * Returns segment ID (>= 0) on success, -1 on error. */
+int shmget(int key, int flags);
+
+/* Attach to a shared memory segment.
+ * Returns pointer to the 4KB segment, or NULL on error. */
+void *shmat(int shm_id);
+
+/* Detach from a shared memory segment.
+ * Returns 0 on success, -1 on error. */
+int shmdt(int shm_id);
+
+/*
+ * IPC: Semaphores
+ *
+ * 8 kernel-managed counting semaphores, accessed by key.
+ * semwait blocks if count is 0 (ecall-retry pattern).
+ */
+
+/* Get/create a semaphore by key.
+ * value: initial count (only used when creating).
+ * flags: IPC_CREAT to create, IPC_EXCL to fail if exists.
+ * Returns semaphore ID (>= 0) on success, -1 on error. */
+int semget(int key, int value, int flags);
+
+/* Wait (decrement) a semaphore. Blocks if count is 0. */
+int semwait(int sem_id);
+
+/* Post (increment) a semaphore. Wakes one blocked waiter. */
+int sempost(int sem_id);
+
+/* Close a semaphore handle. Frees when all handles closed. */
+int semclose(int sem_id);
+
+/*
  * Environment variables
  *
  * Each process has its own environment, inherited from its parent on

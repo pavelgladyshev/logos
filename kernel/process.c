@@ -7,6 +7,8 @@
 #include "console_dev.h"  /* for CONSOLE_MAJOR */
 #include "fs_types.h"     /* for FT_CHARDEV, FT_PIPE */
 #include "pipe.h"         /* for pipe_close_fd */
+#include "shm.h"          /* for shm_detach */
+#include "sem.h"          /* for sem_close */
 #include "string.h"
 #include "trap.h"
 
@@ -47,6 +49,8 @@ int proc_alloc(void) {
             proc_table[i].sleep_reason = SLEEP_NONE;
             proc_table[i].sleep_chan = -1;
             proc_table[i].name[0] = '\0';
+            proc_table[i].shm_attached = 0;
+            proc_table[i].sem_attached = 0;
             return i;
         }
     }
@@ -66,8 +70,34 @@ static void proc_close_pipes(int slot) {
     }
 }
 
+/* Detach all SHM segments in a slot, decrementing refcounts */
+static void proc_close_shm(int slot) {
+    int i;
+    uint8_t mask = proc_table[slot].shm_attached;
+    for (i = 0; i < MAX_SHM; i++) {
+        if (mask & (1 << i)) {
+            shm_detach(i);
+        }
+    }
+    proc_table[slot].shm_attached = 0;
+}
+
+/* Close all semaphore handles in a slot, decrementing refcounts */
+static void proc_close_sems(int slot) {
+    int i;
+    uint8_t mask = proc_table[slot].sem_attached;
+    for (i = 0; i < MAX_SEMS; i++) {
+        if (mask & (1 << i)) {
+            sem_close(i);
+        }
+    }
+    proc_table[slot].sem_attached = 0;
+}
+
 void proc_free(int slot) {
     proc_close_pipes(slot);
+    proc_close_shm(slot);
+    proc_close_sems(slot);
 
     proc_table[slot].state = PROC_FREE;
     proc_table[slot].pid = 0;
