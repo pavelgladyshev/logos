@@ -7,6 +7,23 @@
 #include "fs_globals.h"
 #include "device.h"
 
+/* Resolve logical block index to physical block number via direct/indirect.
+ * Returns 0 if unmapped, or block number. indirect_buf is used as scratch. */
+static uint16_t get_block_num(const struct inode *in, uint32_t block_idx) {
+    if (block_idx < DIRECT_BLOCKS)
+        return in->blocks[block_idx];
+    uint32_t ind_idx = block_idx - DIRECT_BLOCKS;
+    if (ind_idx >= INDIRECT_ENTRIES || in->indirect == 0)
+        return 0;
+    /* Read indirect block */
+    if (block_read(in->indirect, block_buf) != FS_OK)
+        return 0;
+    uint16_t *entries = (uint16_t *)block_buf;
+    return entries[ind_idx];
+}
+
+/* Maximum logical blocks a file can address */
+#define MAX_FILE_BLOCKS  (DIRECT_BLOCKS + INDIRECT_ENTRIES)
 
 int file_create(uint32_t dir_ino, const char *name) {
     /* Reject . and .. as explicit names */
@@ -74,11 +91,15 @@ int file_read(uint32_t ino, uint32_t offset, void *buf, uint32_t len) {
         uint32_t chunk = BLOCK_SIZE - block_offset;
         if (chunk > len) chunk = len;
 
-        if (block_idx >= DIRECT_BLOCKS || in.blocks[block_idx] == 0) {
-            break;
+        uint16_t bnum;
+        if (block_idx < DIRECT_BLOCKS) {
+            bnum = in.blocks[block_idx];
+        } else {
+            bnum = get_block_num(&in, block_idx);
         }
+        if (bnum == 0) break;
 
-        if (block_read(in.blocks[block_idx], block_buf) != FS_OK) {
+        if (block_read(bnum, block_buf) != FS_OK) {
             return FS_ERR_IO;
         }
 
@@ -128,19 +149,23 @@ int file_load_direct(uint32_t ino, uint32_t offset, void *buf, uint32_t len) {
         uint32_t chunk = BLOCK_SIZE - block_offset;
         if (chunk > len) chunk = len;
 
-        if (block_idx >= DIRECT_BLOCKS || in.blocks[block_idx] == 0) {
-            break;
+        uint16_t bnum;
+        if (block_idx < DIRECT_BLOCKS) {
+            bnum = in.blocks[block_idx];
+        } else {
+            bnum = get_block_num(&in, block_idx);
         }
+        if (bnum == 0) break;
 
         if (block_offset == 0 && chunk == BLOCK_SIZE &&
             (((unsigned long)dst) & 3) == 0) {
             /* Full block, dst 4-byte aligned: DMA directly to destination */
-            if (block_read(in.blocks[block_idx], dst) != FS_OK) {
+            if (block_read(bnum, dst) != FS_OK) {
                 return FS_ERR_IO;
             }
         } else {
             /* Partial block or unaligned dst: use intermediate buffer */
-            if (block_read(in.blocks[block_idx], block_buf) != FS_OK) {
+            if (block_read(bnum, block_buf) != FS_OK) {
                 return FS_ERR_IO;
             }
             memcpy(dst, block_buf + block_offset, chunk);
@@ -180,32 +205,65 @@ int file_write(uint32_t ino, uint32_t offset, const void *buf, uint32_t len) {
         uint32_t chunk = BLOCK_SIZE - block_offset;
         if (chunk > len) chunk = len;
 
-        if (block_idx >= DIRECT_BLOCKS) {
-            break;  /* File too large for direct blocks only */
+        if (block_idx >= MAX_FILE_BLOCKS) {
+            break;  /* File too large */
         }
 
         /* Allocate block if needed */
-        if (in.blocks[block_idx] == 0) {
-            int new_block = block_alloc();
-            if (new_block < 0) {
-                /* Update inode with what we've written so far */
-                if (offset > in.size) in.size = offset;
-                inode_write(ino, &in);
-                return bytes_written > 0 ? bytes_written : new_block;
+        uint16_t bnum;
+        if (block_idx < DIRECT_BLOCKS) {
+            bnum = in.blocks[block_idx];
+            if (bnum == 0) {
+                int nb = block_alloc();
+                if (nb < 0) {
+                    if (offset > in.size) in.size = offset;
+                    inode_write(ino, &in);
+                    return bytes_written > 0 ? bytes_written : nb;
+                }
+                in.blocks[block_idx] = nb;
+                bnum = nb;
             }
-            in.blocks[block_idx] = new_block;
+        } else {
+            /* Indirect block region */
+            if (in.indirect == 0) {
+                int ib = block_alloc();
+                if (ib < 0) {
+                    if (offset > in.size) in.size = offset;
+                    inode_write(ino, &in);
+                    return bytes_written > 0 ? bytes_written : ib;
+                }
+                in.indirect = ib;
+                memset(block_buf, 0, BLOCK_SIZE);
+                block_write(ib, block_buf);
+            }
+            /* Read indirect block, allocate data block if needed */
+            block_read(in.indirect, block_buf);
+            uint16_t *entries = (uint16_t *)block_buf;
+            uint32_t ind_idx = block_idx - DIRECT_BLOCKS;
+            bnum = entries[ind_idx];
+            if (bnum == 0) {
+                int nb = block_alloc();
+                if (nb < 0) {
+                    if (offset > in.size) in.size = offset;
+                    inode_write(ino, &in);
+                    return bytes_written > 0 ? bytes_written : nb;
+                }
+                entries[ind_idx] = nb;
+                block_write(in.indirect, block_buf);
+                bnum = nb;
+            }
         }
 
         /* Read-modify-write for partial block writes */
         if (block_offset != 0 || chunk != BLOCK_SIZE) {
-            if (block_read(in.blocks[block_idx], block_buf) != FS_OK) {
+            if (block_read(bnum, block_buf) != FS_OK) {
                 return FS_ERR_IO;
             }
         }
 
         memcpy(block_buf + block_offset, src, chunk);
 
-        if (block_write(in.blocks[block_idx], block_buf) != FS_OK) {
+        if (block_write(bnum, block_buf) != FS_OK) {
             return FS_ERR_IO;
         }
 
@@ -240,10 +298,36 @@ int file_truncate(uint32_t ino, uint32_t new_size) {
 
     /* Free blocks that are no longer needed */
     uint32_t first_free_block = (new_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    /* Free direct blocks */
     for (uint32_t i = first_free_block; i < DIRECT_BLOCKS; i++) {
         if (in.blocks[i] != 0) {
             block_free(in.blocks[i]);
             in.blocks[i] = 0;
+        }
+    }
+    /* Free indirect block entries */
+    if (in.indirect != 0) {
+        if (first_free_block <= DIRECT_BLOCKS) {
+            /* Free all indirect entries and the indirect block itself */
+            block_read(in.indirect, block_buf);
+            uint16_t *entries = (uint16_t *)block_buf;
+            for (uint32_t i = 0; i < INDIRECT_ENTRIES; i++) {
+                if (entries[i] != 0) block_free(entries[i]);
+            }
+            block_free(in.indirect);
+            in.indirect = 0;
+        } else {
+            /* Free only entries beyond first_free_block */
+            block_read(in.indirect, block_buf);
+            uint16_t *entries = (uint16_t *)block_buf;
+            uint32_t start = first_free_block - DIRECT_BLOCKS;
+            for (uint32_t i = start; i < INDIRECT_ENTRIES; i++) {
+                if (entries[i] != 0) {
+                    block_free(entries[i]);
+                    entries[i] = 0;
+                }
+            }
+            block_write(in.indirect, block_buf);
         }
     }
 

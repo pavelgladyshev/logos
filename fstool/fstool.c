@@ -236,8 +236,8 @@ static int cmd_add(const char *blockfile, const char *path, const char *hostfile
     long file_size = ftell(hf);
     fseek(hf, 0, SEEK_SET);
 
-    if (file_size > DIRECT_BLOCKS * BLOCK_SIZE) {
-        fprintf(stderr, "Error: File too large (max %d bytes)\n", DIRECT_BLOCKS * BLOCK_SIZE);
+    if (file_size > (long)(DIRECT_BLOCKS + INDIRECT_ENTRIES) * BLOCK_SIZE) {
+        fprintf(stderr, "Error: File too large (max %ld bytes)\n", (long)(DIRECT_BLOCKS + INDIRECT_ENTRIES) * BLOCK_SIZE);
         fclose(hf);
         return 1;
     }

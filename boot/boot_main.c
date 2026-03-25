@@ -71,6 +71,7 @@ void boot_main(void)
 
     {
         int b;
+        /* Load direct blocks */
         for (b = 0; b < DIRECT_BLOCKS && loaded < file_size; b++) {
             uint32_t chunk;
 
@@ -81,7 +82,6 @@ void boot_main(void)
             if (chunk > BLOCK_SIZE)
                 chunk = BLOCK_SIZE;
 
-            /* DMA directly to destination in RAM */
             if (boot_block_read(kernel_in.blocks[b], dst) != 0) {
                 boot_puts("BOOT: Failed to read kernel block\n");
                 boot_halt();
@@ -89,6 +89,34 @@ void boot_main(void)
 
             dst += BLOCK_SIZE;
             loaded += chunk;
+        }
+        /* Load indirect blocks if needed */
+        if (loaded < file_size && kernel_in.indirect != 0) {
+            uint16_t ind_entries[BLOCK_SIZE / sizeof(uint16_t)];
+            int i;
+
+            if (boot_block_read(kernel_in.indirect, ind_entries) != 0) {
+                boot_puts("BOOT: Failed to read indirect block\n");
+                boot_halt();
+            }
+            for (i = 0; i < (int)(BLOCK_SIZE / sizeof(uint16_t)) && loaded < file_size; i++) {
+                uint32_t chunk;
+
+                if (ind_entries[i] == 0)
+                    break;
+
+                chunk = file_size - loaded;
+                if (chunk > BLOCK_SIZE)
+                    chunk = BLOCK_SIZE;
+
+                if (boot_block_read(ind_entries[i], dst) != 0) {
+                    boot_puts("BOOT: Failed to read kernel block\n");
+                    boot_halt();
+                }
+
+                dst += BLOCK_SIZE;
+                loaded += chunk;
+            }
         }
     }
 

@@ -25,7 +25,7 @@ NATIVE_CC = gcc
 BUILD_DIR = build
 
 # Common RISC-V compilation flags
-RISCV_CFLAGS = -Os -march=$(RISCV_ISA) -mabi=$(RISCV_ABI) -mcmodel=medany -g $(CFLAGS)
+RISCV_CFLAGS = -O -march=$(RISCV_ISA) -mabi=$(RISCV_ABI) -mcmodel=medany -g $(CFLAGS)
 
 # Default target: build bootloader ROM image
 .DEFAULT_GOAL := boot-rom.txt

@@ -130,10 +130,22 @@ int boot_file_read(uint32_t ino, struct superblock *sb, uint8_t *buf,
         uint32_t chunk = BLOCK_SIZE - block_off;
         if (chunk > len) chunk = len;
 
-        if (block_idx >= DIRECT_BLOCKS || in.blocks[block_idx] == 0)
+        uint16_t bnum;
+        if (block_idx < DIRECT_BLOCKS) {
+            bnum = in.blocks[block_idx];
+        } else {
+            /* Indirect block */
+            uint32_t ind_idx = block_idx - DIRECT_BLOCKS;
+            if (in.indirect == 0 || ind_idx >= INDIRECT_ENTRIES)
+                break;
+            if (boot_block_read(in.indirect, buf) != 0)
+                return -1;
+            bnum = ((uint16_t *)buf)[ind_idx];
+        }
+        if (bnum == 0)
             break;
 
-        if (boot_block_read(in.blocks[block_idx], buf) != 0)
+        if (boot_block_read(bnum, buf) != 0)
             return -1;
 
         boot_memcpy(d, buf + block_off, chunk);

@@ -15,7 +15,8 @@
 /* File system constants */
 #define BLOCK_SIZE         512       /* Size of each block in bytes */
 #define MAX_FILENAME       28        /* Maximum filename length */
-#define DIRECT_BLOCKS      60        /* Number of direct block pointers in inode */
+#define DIRECT_BLOCKS      59        /* Number of direct block pointers in inode */
+#define INDIRECT_ENTRIES    (BLOCK_SIZE / sizeof(uint16_t))  /* 256 entries per indirect block */
 #define MAX_INODES         64        /* Maximum number of inodes */
 #define MAX_BLOCKS         1024      /* Maximum number of blocks */
 #define ROOT_INODE         0         /* Inode number of root directory */
@@ -71,6 +72,7 @@ struct inode {
     uint8_t  minor;            /* Minor device number (for FT_CHARDEV) */
     uint8_t  link_count;       /* Number of hard links to this inode */
     uint16_t blocks[DIRECT_BLOCKS];  /* Direct block pointers (16-bit indices) */
+    uint16_t indirect;               /* Single indirect block pointer */
 };
 
 /* Size: 4 + 1 + 1 + 1 + 1 + 60*2 = 128 bytes per inode */
