@@ -559,13 +559,13 @@ static int32_t sys_spawn(trap_frame_t *tf) {
     }
     proc_set_name(child, spawn_path_buf);
 
-    /* Set up the child's stack with arguments */
-    setup_user_stack(child->stack_top, &sp, &argv_addr);
+    /* Set up the child's stack with arguments (use virtual addresses) */
+    setup_user_stack(USER_STACK_TOP, &sp, &argv_addr);
 
     /* Set up child's trap frame */
     child->tf.c_trap_sp = proc_table[current_proc].tf.c_trap_sp;
     child->tf.c_trap = proc_table[current_proc].tf.c_trap;
-    child->tf.mepc = info.entry_point;
+    child->tf.mepc = USER_VA_BASE + (info.entry_point - child->mem_base);
     child->tf.sp = sp;
     child->tf.ra = 0;  /* No return address */
     child->tf.a0 = (uint32_t)spawn_argc;
@@ -621,24 +621,9 @@ static int32_t sys_fork(trap_frame_t *tf) {
     /* Copy trap frame */
     child->tf = parent->tf;
 
-    /* Compute address delta for register adjustment */
-    delta = (int32_t)(child->mem_base - parent->mem_base);
-    parent_base = parent->mem_base;
-    parent_end = parent_base + PROC_SLOT_SIZE;
-
-    /* Always adjust sp and mepc — they point into the process's slot */
-    child->tf.sp += delta;
-    child->tf.mepc += delta;
-
-    /* Adjust ra and s0 if they point within parent's slot */
-    if (child->tf.ra >= parent_base && child->tf.ra < parent_end) {
-        child->tf.ra += delta;
-    }
-    if (child->tf.s0 >= parent_base && child->tf.s0 < parent_end) {
-        child->tf.s0 += delta;
-    }
-
-    /* Advance child's mepc past the ecall instruction */
+    /* With virtual memory, all processes use the same virtual addresses
+     * (USER_VA_BASE), so no register adjustment is needed. Just advance
+     * mepc past the ecall instruction. */
     child->tf.mepc += 4;
 
     /* Child's fork() returns 0 */
@@ -770,11 +755,11 @@ static int32_t sys_exec(trap_frame_t *tf) {
     }
     proc_set_name(cur, spawn_path_buf);
 
-    /* Set up the new stack with arguments */
-    setup_user_stack(cur->stack_top, &sp, &argv_addr);
+    /* Set up the new stack with arguments (use virtual addresses) */
+    setup_user_stack(USER_STACK_TOP, &sp, &argv_addr);
 
     /* Reset trap frame for new program (keep c_trap_sp, c_trap) */
-    cur->tf.mepc = info.entry_point;
+    cur->tf.mepc = USER_VA_BASE + (info.entry_point - cur->mem_base);
     cur->tf.sp = sp;
     cur->tf.ra = 0;
     cur->tf.a0 = (uint32_t)spawn_argc;
