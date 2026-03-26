@@ -77,7 +77,9 @@ void c_trap_handler(trap_frame_t *tf) {
         /* Normal syscall - return to user program */
         trap_ret(tf);
     } else if (cause == SCAUSE_S_TIMER_INT) {
-        /* Supervisor timer interrupt — preempt current, reschedule */
+        /* Supervisor timer interrupt — preempt current, reschedule.
+         * Must clear STIP to prevent immediate re-entry after sret. */
+        clear_stip();
         proc_table[current_proc].state = PROC_READY;
         schedule();  /* never returns */
     } else if (cause & SCAUSE_INTERRUPT) {

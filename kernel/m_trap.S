@@ -213,6 +213,18 @@ set_spie:
     ret
 
 /*
+ * void clear_stip(void)
+ *
+ * Clear SIP.STIP (bit 5) to acknowledge the supervisor timer interrupt.
+ * Must be called from S-mode timer handler to prevent re-entry.
+ */
+    .globl clear_stip
+clear_stip:
+    li   t0, (1 << 5)         /* STIP bit */
+    csrc 0x144, t0             /* sip &= ~STIP */
+    ret
+
+/*
  * void drop_to_smode(uint32_t entry)
  *
  * Set mepc to entry address and execute mret to transition from
@@ -228,8 +240,9 @@ drop_to_smode:
 
 /*
  * Note on STIP handling:
- * The M-mode timer handler clears and re-sets STIP on each timer tick.
- * The S-mode kernel does NOT need to clear STIP — it's handled automatically
- * by the M-mode handler when the next timer interrupt fires.
- * Between ticks, SIE=0 during S-mode trap handling prevents re-triggering.
+ * The M-mode timer handler sets STIP on each timer tick to forward the
+ * interrupt to S-mode. The S-mode timer handler MUST clear STIP (via
+ * clear_stip / csrc sip, STIP) before returning to user mode via sret.
+ * Otherwise, STIP remains pending and fires immediately after sret
+ * re-enables SIE, causing an infinite trap loop.
  */

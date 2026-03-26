@@ -188,6 +188,7 @@ void write_sepc(uint32_t val);
 void set_mpp_supervisor(void);  /* Set mstatus.MPP = Supervisor (01) */
 void clear_spp(void);           /* Clear sstatus.SPP = User (0) */
 void set_spie(void);            /* Set sstatus.SPIE = 1 */
+void clear_stip(void);          /* Clear SIP.STIP to acknowledge S-mode timer */
 void write_sie(uint32_t val);   /* Write supervisor interrupt enable */
 void set_sstatus_bit(uint32_t mask);
 void clear_sstatus_bit(uint32_t mask);

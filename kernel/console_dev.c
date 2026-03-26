@@ -10,23 +10,29 @@
 #include "console.h"
 #include "console_dev.h"
 
+/* Debug: set to 1 to print RCR/RDR values during console reads */
+#define CONSOLE_DEBUG 0
+
 static int console_read(uint8_t minor, void *buf, uint32_t len) {
     uint8_t *dst = (uint8_t *)buf;
     uint32_t i = 0;
 
+#if CONSOLE_DEBUG
+    printf("[con_read] buf=0x%x len=%d\n", (uint32_t)buf, len);
+#endif
+
     /* Line-buffered input with echo */
     while (i < len) {
-        /* Poll for data available (bit 0 of RCR).
-         * Delay between polls so the Logisim GUI thread can
-         * process key events (simulation thread starvation). */
+        /* Poll for data available (bit 0 of RCR) */
         while ((CONSOLE_RCR & 1) == 0) {
-            __asm__ volatile(
-                ".rept 256\n\t"
-                "nop\n\t"
-                ".endr\n\t"
-            );
+            /* busy wait for keyboard input */
         }
         uint8_t c = (uint8_t)CONSOLE_RDR;
+
+#if CONSOLE_DEBUG
+        printf("[con_read] c='%c' (0x%x) i=%d\n",
+               (c >= 0x20 && c < 0x7f) ? c : '.', c, i);
+#endif
 
         if (c == 0x04) {        /* Ctrl-D: signal EOF */
             break;              /* Return bytes read so far (0 = EOF) */
