@@ -47,10 +47,12 @@ m_trap_handler:
     li   t0, TIMER_MTIMECMP
     sw   t1, 0(t0)            /* mtimecmp = mtime + TIME_SLICE */
 
-    /* Clear any previous STIP, then set it to inject supervisor timer interrupt */
-    li   t0, (1 << 5)         /* STIP bit */
-    csrc mip, t0              /* Clear first (in case previous wasn't handled) */
-    csrs mip, t0              /* Set STIP — S-mode will see this on sret */
+    /* Inject supervisor software interrupt to forward timer tick to S-mode.
+     * We use SSIP (bit 1) instead of STIP (bit 5) because STIP is read-only
+     * from S-mode — the S-mode handler couldn't clear it, causing an infinite
+     * trap loop after sret re-enables interrupts. SSIP is writable from S-mode. */
+    li   t0, (1 << 1)         /* SSIP bit */
+    csrs mip, t0              /* Set SSIP — S-mode will see this as software interrupt */
 
     /* Restore t0 and return */
     csrr t0, mscratch
@@ -213,10 +215,22 @@ set_spie:
     ret
 
 /*
+ * void clear_ssip(void)
+ *
+ * Clear SIP.SSIP (bit 1) to acknowledge the supervisor software interrupt.
+ * SSIP is writable from S-mode (unlike STIP which is read-only from S-mode).
+ */
+    .globl clear_ssip
+clear_ssip:
+    li   t0, (1 << 1)         /* SSIP bit */
+    csrc 0x144, t0             /* sip &= ~SSIP */
+    ret
+
+/*
  * void clear_stip(void)
  *
- * Clear SIP.STIP (bit 5) to acknowledge the supervisor timer interrupt.
- * Must be called from S-mode timer handler to prevent re-entry.
+ * Clear SIP.STIP (bit 5). Note: STIP may be read-only from S-mode
+ * depending on implementation. Prefer clear_ssip() for timer forwarding.
  */
     .globl clear_stip
 clear_stip:
@@ -239,10 +253,11 @@ drop_to_smode:
     mret
 
 /*
- * Note on STIP handling:
- * The M-mode timer handler sets STIP on each timer tick to forward the
- * interrupt to S-mode. The S-mode timer handler MUST clear STIP (via
- * clear_stip / csrc sip, STIP) before returning to user mode via sret.
- * Otherwise, STIP remains pending and fires immediately after sret
- * re-enables SIE, causing an infinite trap loop.
+ * Note on timer forwarding:
+ * The M-mode timer handler forwards timer ticks to S-mode using SSIP
+ * (supervisor software interrupt), NOT STIP. This is because STIP is
+ * read-only from S-mode — the S-mode handler cannot clear it, which
+ * would cause an infinite trap loop after sret re-enables interrupts.
+ * SSIP is writable from S-mode, so the S-mode handler can clear it
+ * via clear_ssip() before returning.
  */

@@ -42,6 +42,7 @@ extern void m_trap_handler(void);
 
 /* Supervisor-mode trap cause values */
 #define SCAUSE_INTERRUPT       ((uint32_t)0x80000000)
+#define SCAUSE_S_SW_INT        ((uint32_t)(SCAUSE_INTERRUPT | 1))
 #define SCAUSE_S_TIMER_INT     ((uint32_t)(SCAUSE_INTERRUPT | 5))
 #define SCAUSE_ECALL_FROM_U    ((uint32_t)8)
 #define SCAUSE_INST_PAGE_FAULT ((uint32_t)12)
@@ -53,8 +54,10 @@ extern void m_trap_handler(void);
  * store page fault(15), illegal instruction(2), breakpoint(3),
  * load/store address misaligned(4,6), load/store access fault(5,7) */
 #define MEDELEG_BITS  ((1<<2)|(1<<3)|(1<<4)|(1<<5)|(1<<6)|(1<<7)|(1<<8)|(1<<12)|(1<<13)|(1<<15))
-/* Delegate supervisor timer interrupt (bit 5) and supervisor external (bit 9) */
-#define MIDELEG_BITS  ((1<<5)|(1<<9))
+/* Delegate supervisor software interrupt (bit 1), supervisor timer (bit 5),
+ * and supervisor external (bit 9).
+ * Timer forwarding uses SSIP (bit 1) because STIP is read-only from S-mode. */
+#define MIDELEG_BITS  ((1<<1)|(1<<5)|(1<<9))
 
 /* Root page table for kernel identity mapping (shared by all processes in Phase 2) */
 static uint32_t kernel_pt_root;
@@ -76,9 +79,14 @@ void c_trap_handler(trap_frame_t *tf) {
         }
         /* Normal syscall - return to user program */
         trap_ret(tf);
+    } else if (cause == SCAUSE_S_SW_INT) {
+        /* Supervisor software interrupt — used for timer forwarding from M-mode.
+         * Clear SSIP (writable from S-mode) to prevent re-entry after sret. */
+        clear_ssip();
+        proc_table[current_proc].state = PROC_READY;
+        schedule();  /* never returns */
     } else if (cause == SCAUSE_S_TIMER_INT) {
-        /* Supervisor timer interrupt — preempt current, reschedule.
-         * Must clear STIP to prevent immediate re-entry after sret. */
+        /* Direct supervisor timer — clear and reschedule */
         clear_stip();
         proc_table[current_proc].state = PROC_READY;
         schedule();  /* never returns */
@@ -226,7 +234,7 @@ int main(void)
     *TIMER_MTIMECMP = *TIMER_MTIME + TIME_SLICE;
 
     /* 5. Enable supervisor timer interrupt in SIE */
-    write_sie(0x20);  /* SIE.STIE (bit 5) */
+    write_sie(0x22);  /* SIE.SSIE (bit 1) + SIE.STIE (bit 5) */
 
     /* 6. Build kernel identity-mapped page tables */
     kernel_pt_root = pt_alloc();
