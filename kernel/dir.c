@@ -149,8 +149,11 @@ int dir_remove(uint32_t dir_ino, const char *name) {
                     return FS_ERR_IO;
                 }
 
-                dir.size -= DIRENT_SIZE;
-                return inode_write(dir_ino, &dir);
+                /* Don't decrement dir.size — the slot becomes a hole
+                 * that dir_add can reuse. Shrinking size would cause
+                 * dir_lookup to stop scanning before reaching entries
+                 * that follow this slot. */
+                return FS_OK;
             }
         }
     }
@@ -237,6 +240,7 @@ int fs_mkdir(uint32_t parent_ino, const char *name) {
     struct inode in;
     memset(&in, 0, INODE_SIZE);
     in.type = FT_DIR;
+    in.link_count = 1;
     in.size = 0;
 
     if (inode_write(ino, &in) != FS_OK) {

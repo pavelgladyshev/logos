@@ -35,6 +35,33 @@
 static int resolve_parent(const char *path, uint32_t *parent_ino, const char **name);
 
 /*
+ * Translate a user virtual address + length to a kernel-accessible physical
+ * address.  Returns the physical address (usable as a kernel pointer via the
+ * identity-mapped megapage at L1[0]), or 0 if any part of the range falls
+ * outside the process's virtual address space.
+ *
+ * This is the primary mechanism for Phase 4 (syscall pointer translation):
+ * S-mode cannot access pages with PTE.U=1 (unless sstatus.SUM is set), so
+ * every user-supplied buffer must be translated before the kernel touches it.
+ */
+static uint32_t user_to_kern(uint32_t uva, uint32_t len) {
+    uint32_t pa;
+    if (len == 0) return 0;
+    pa = uva_to_pa(current_proc, uva);
+    if (!pa) return 0;
+    if (len > 1 && !uva_to_pa(current_proc, uva + len - 1)) return 0;
+    return pa;
+}
+
+/*
+ * Copy a user-space string into a kernel buffer via physical address translation.
+ * Convenience wrapper around copyinstr that uses current_proc.
+ */
+static int copyustr(char *kbuf, uint32_t uva, uint32_t maxlen) {
+    return copyinstr(current_proc, kbuf, uva, maxlen);
+}
+
+/*
  * Get a file descriptor entry for the current process.
  * Returns pointer to fd_entry, or NULL if fd is invalid.
  */
@@ -128,23 +155,27 @@ static int sys_exit(trap_frame_t *tf) {
  */
 static int32_t sys_read(trap_frame_t *tf) {
     int fd = (int)tf->a0;
-    void *buf = (void *)tf->a1;
     uint32_t len = tf->a2;
     struct fd_entry *fde;
     int result;
+    void *kbuf;
 
     fde = get_fd(fd);
     if (fde == (struct fd_entry *)0) {
         return -1;  /* EBADF */
     }
 
+    /* Translate user buffer VA to kernel-accessible physical address */
+    kbuf = (void *)user_to_kern(tf->a1, len);
+    if (!kbuf) return -1;
+
     if (fde->type == FT_CHARDEV) {
         /* Read from character device */
-        result = device_read(fde->major, fde->minor, buf, len);
+        result = device_read(fde->major, fde->minor, kbuf, len);
         return result;
     } else if (fde->type == FT_FILE) {
         /* Read from regular file */
-        result = file_read(fde->inode, fde->offset, buf, len);
+        result = file_read(fde->inode, fde->offset, kbuf, len);
         if (result > 0) {
             fde->offset += result;
         }
@@ -152,7 +183,7 @@ static int32_t sys_read(trap_frame_t *tf) {
     } else if (fde->type == FT_PIPE) {
         /* Read from pipe */
         int pipe_idx = (int)fde->inode;
-        result = pipe_read(pipe_idx, buf, len);
+        result = pipe_read(pipe_idx, kbuf, len);
         if (result == -2) {
             /* Would block: sleep and retry (ecall will re-execute) */
             proc_table[current_proc].state = PROC_SLEEPING;
@@ -173,23 +204,27 @@ static int32_t sys_read(trap_frame_t *tf) {
  */
 static int32_t sys_write(trap_frame_t *tf) {
     int fd = (int)tf->a0;
-    const void *buf = (const void *)tf->a1;
     uint32_t len = tf->a2;
     struct fd_entry *fde;
     int result;
+    const void *kbuf;
 
     fde = get_fd(fd);
     if (fde == (struct fd_entry *)0) {
         return -1;  /* EBADF */
     }
 
+    /* Translate user buffer VA to kernel-accessible physical address */
+    kbuf = (const void *)user_to_kern(tf->a1, len);
+    if (!kbuf) return -1;
+
     if (fde->type == FT_CHARDEV) {
         /* Write to character device */
-        result = device_write(fde->major, fde->minor, buf, len);
+        result = device_write(fde->major, fde->minor, kbuf, len);
         return result;
     } else if (fde->type == FT_FILE) {
         /* Write to regular file */
-        result = file_write(fde->inode, fde->offset, buf, len);
+        result = file_write(fde->inode, fde->offset, kbuf, len);
         if (result > 0) {
             fde->offset += result;
         }
@@ -197,7 +232,7 @@ static int32_t sys_write(trap_frame_t *tf) {
     } else if (fde->type == FT_PIPE) {
         /* Write to pipe */
         int pipe_idx = (int)fde->inode;
-        result = pipe_write(pipe_idx, buf, len);
+        result = pipe_write(pipe_idx, kbuf, len);
         if (result == -2) {
             /* Would block: sleep and retry (ecall will re-execute) */
             proc_table[current_proc].state = PROC_SLEEPING;
@@ -308,7 +343,7 @@ static int resolve_path(const char *path, char *abs_path, int abs_size) {
  * Returns: file descriptor, or negative error
  */
 static int32_t sys_open(trap_frame_t *tf) {
-    const char *path = (const char *)tf->a0;
+    char kpath[MAX_ARG_LEN];
     uint32_t flags = tf->a1;
     char resolved[MAX_ARG_LEN];
     uint32_t ino;
@@ -317,8 +352,11 @@ static int32_t sys_open(trap_frame_t *tf) {
     int result;
     struct fd_entry *fde;
 
+    /* Copy path from user space to kernel buffer */
+    if (copyustr(kpath, tf->a0, MAX_ARG_LEN) < 0) return -1;
+
     /* Resolve relative path to absolute */
-    if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
+    if (resolve_path(kpath, resolved, MAX_ARG_LEN) < 0) {
         return -1;
     }
 
@@ -425,44 +463,55 @@ static int spawn_argc;
  * Copies spawn_argv_buf[0..spawn_argc-1] strings to the stack area,
  * builds pointer array.
  *
- * stack_top: top of the process's stack
- * out_sp: receives the new stack pointer value
- * out_argv: receives the address of the argv pointer array
+ * All writes go to physical addresses (via identity-mapped kernel megapage),
+ * but all pointers stored in the stack are virtual addresses (what the user
+ * program sees). The caller supplies phys_base (physical address of the
+ * process's memory slot) so we can compute the VA↔PA delta.
+ *
+ * phys_base: physical start of the process's 32KB slot
+ * out_sp: receives the new stack pointer value (virtual)
+ * out_argv: receives the address of the argv pointer array (virtual)
  */
-static void setup_user_stack(uint32_t stack_top, uint32_t *out_sp, uint32_t *out_argv) {
-    uint32_t sp = stack_top;
-    uint32_t *argv_ptrs;
-    char *argv_strings;
+static void setup_user_stack(uint32_t phys_base, uint32_t *out_sp, uint32_t *out_argv) {
+    uint32_t va_sp = USER_STACK_TOP;
+    uint32_t va_argv_strings;
+    uint32_t va_argv_ptrs;
+    char *pa_argv_strings;
+    uint32_t *pa_argv_ptrs;
     int i, len;
 
-    /* Reserve space for argv strings at the top */
-    argv_strings = (char *)(sp - (spawn_argc * MAX_ARG_LEN));
-    sp = (uint32_t)argv_strings;
+    /* Reserve space for argv strings at the top of stack (virtual layout) */
+    va_argv_strings = va_sp - (spawn_argc * MAX_ARG_LEN);
+    va_sp = va_argv_strings;
 
-    /* Copy argv strings from kernel buffer */
+    /* Compute physical address for writing (kernel accesses via identity map) */
+    pa_argv_strings = (char *)(phys_base + (va_argv_strings - USER_VA_BASE));
+
+    /* Copy argv strings from kernel buffer to physical stack memory */
     for (i = 0; i < spawn_argc; i++) {
         len = strlen(spawn_argv_buf[i]);
-        memcpy(argv_strings + (i * MAX_ARG_LEN), spawn_argv_buf[i], len + 1);
+        memcpy(pa_argv_strings + (i * MAX_ARG_LEN), spawn_argv_buf[i], len + 1);
     }
 
     /* Align sp to 16 bytes */
-    sp = sp & ~0xF;
+    va_sp = va_sp & ~0xF;
 
     /* Reserve space for argv pointer array (including NULL terminator) */
-    sp -= (spawn_argc + 1) * sizeof(uint32_t);
-    argv_ptrs = (uint32_t *)sp;
+    va_sp -= (spawn_argc + 1) * sizeof(uint32_t);
+    va_argv_ptrs = va_sp;
+    pa_argv_ptrs = (uint32_t *)(phys_base + (va_argv_ptrs - USER_VA_BASE));
 
-    /* Fill in argv pointers */
+    /* Fill in argv pointers (store virtual addresses for user program) */
     for (i = 0; i < spawn_argc; i++) {
-        argv_ptrs[i] = (uint32_t)(argv_strings + (i * MAX_ARG_LEN));
+        pa_argv_ptrs[i] = va_argv_strings + (i * MAX_ARG_LEN);
     }
-    argv_ptrs[spawn_argc] = 0;  /* NULL terminator */
+    pa_argv_ptrs[spawn_argc] = 0;  /* NULL terminator */
 
     /* Align sp to 16 bytes again */
-    sp = sp & ~0xF;
+    va_sp = va_sp & ~0xF;
 
-    *out_sp = sp;
-    *out_argv = (uint32_t)argv_ptrs;
+    *out_sp = va_sp;
+    *out_argv = va_argv_ptrs;
 }
 
 /* Set process name from path (uses basename) */
@@ -486,23 +535,15 @@ static void proc_set_name(struct process *p, const char *path) {
  * On failure: returns negative error code to caller.
  */
 static int32_t sys_spawn(trap_frame_t *tf) {
-    const char *path = (const char *)tf->a0;
-    char **argv = (char **)tf->a1;
-    char **envp = (char **)tf->a2;
     struct program_info info;
     int result;
     uint32_t sp, argv_addr;
     int child_slot;
     struct process *child;
-    int len;
 
-    /* Copy path to kernel buffer */
-    len = strlen(path);
-    if (len >= MAX_ARG_LEN) {
-        len = MAX_ARG_LEN - 1;
-    }
-    memcpy(spawn_path_buf, path, len);
-    spawn_path_buf[len] = '\0';
+    /* Copy path from user VA to kernel buffer */
+    if (copyustr(spawn_path_buf, tf->a0, MAX_ARG_LEN) < 0)
+        return -1;
 
     /* Resolve relative path to absolute */
     {
@@ -513,16 +554,17 @@ static int32_t sys_spawn(trap_frame_t *tf) {
         memcpy(spawn_path_buf, resolved, strlen(resolved) + 1);
     }
 
-    /* Copy arguments to kernel buffer */
+    /* Copy arguments from user VA to kernel buffer */
     spawn_argc = 0;
-    if (argv != (char **)0) {
-        while (argv[spawn_argc] != (char *)0 && spawn_argc < MAX_ARGC) {
-            len = strlen(argv[spawn_argc]);
-            if (len >= MAX_ARG_LEN) {
-                len = MAX_ARG_LEN - 1;
-            }
-            memcpy(spawn_argv_buf[spawn_argc], argv[spawn_argc], len);
-            spawn_argv_buf[spawn_argc][len] = '\0';
+    if (tf->a1 != 0) {
+        /* Translate the argv pointer array to kernel address */
+        uint32_t *kargv = (uint32_t *)uva_to_pa(current_proc, tf->a1);
+        if (!kargv) return -1;
+        while (kargv[spawn_argc] != 0 && spawn_argc < MAX_ARGC) {
+            /* Each kargv[i] is a user VA pointing to a string */
+            if (copyustr(spawn_argv_buf[spawn_argc], kargv[spawn_argc],
+                         MAX_ARG_LEN) < 0)
+                return -1;
             spawn_argc++;
         }
     }
@@ -536,16 +578,16 @@ static int32_t sys_spawn(trap_frame_t *tf) {
 
     /* Inherit parent's environment, then override if envp provided */
     proc_env_copy(child_slot, current_proc);
-    if (envp != (char **)0) {
+    if (tf->a2 != 0) {
+        uint32_t *kenvp = (uint32_t *)uva_to_pa(current_proc, tf->a2);
+        if (!kenvp) { proc_free(child_slot); return -1; }
         int envc = 0;
         child->env_count = 0;
-        while (envp[envc] != (char *)0 && envc < MAX_ENVC) {
-            len = strlen(envp[envc]);
-            if (len >= MAX_ENV_LEN) {
-                len = MAX_ENV_LEN - 1;
+        while (kenvp[envc] != 0 && envc < MAX_ENVC) {
+            if (copyustr(child->env[envc], kenvp[envc], MAX_ENV_LEN) < 0) {
+                proc_free(child_slot);
+                return -1;
             }
-            memcpy(child->env[envc], envp[envc], len);
-            child->env[envc][len] = '\0';
             envc++;
         }
         child->env_count = envc;
@@ -559,8 +601,8 @@ static int32_t sys_spawn(trap_frame_t *tf) {
     }
     proc_set_name(child, spawn_path_buf);
 
-    /* Set up the child's stack with arguments (use virtual addresses) */
-    setup_user_stack(USER_STACK_TOP, &sp, &argv_addr);
+    /* Set up the child's stack with arguments (writes to physical, returns VAs) */
+    setup_user_stack(child->mem_base, &sp, &argv_addr);
 
     /* Set up child's trap frame */
     child->tf.c_trap_sp = proc_table[current_proc].tf.c_trap_sp;
@@ -674,6 +716,19 @@ static int32_t sys_fork(trap_frame_t *tf) {
         return -1;
     }
 
+    /* Map inherited SHM segments into child's page table */
+    {
+        int shm_i;
+        uint8_t mask = child->shm_attached;
+        for (shm_i = 0; shm_i < MAX_SHM; shm_i++) {
+            if (mask & (1 << shm_i)) {
+                uint32_t va = SHM_VA_BASE + shm_i * SHM_SEG_SIZE;
+                uint32_t pa = SHM_BASE_ADDR + shm_i * SHM_SEG_SIZE;
+                map_page(child->pt_root_pa, va, pa, PTE_USER_RW);
+            }
+        }
+    }
+
     /* Set up parent-child relationship */
     child->parent = current_proc;
     child->state = PROC_READY;
@@ -692,22 +747,14 @@ static int32_t sys_fork(trap_frame_t *tf) {
  * On failure: returns -1
  */
 static int32_t sys_exec(trap_frame_t *tf) {
-    const char *path = (const char *)tf->a0;
-    char **argv = (char **)tf->a1;
-    char **envp = (char **)tf->a2;
     struct process *cur = &proc_table[current_proc];
     struct program_info info;
     int result;
     uint32_t sp, argv_addr;
-    int len;
 
-    /* Copy path to kernel buffer BEFORE overwriting process memory */
-    len = strlen(path);
-    if (len >= MAX_ARG_LEN) {
-        len = MAX_ARG_LEN - 1;
-    }
-    memcpy(spawn_path_buf, path, len);
-    spawn_path_buf[len] = '\0';
+    /* Copy path from user VA to kernel buffer BEFORE overwriting process memory */
+    if (copyustr(spawn_path_buf, tf->a0, MAX_ARG_LEN) < 0)
+        return -1;
 
     /* Resolve relative path to absolute */
     {
@@ -718,31 +765,28 @@ static int32_t sys_exec(trap_frame_t *tf) {
         memcpy(spawn_path_buf, resolved, strlen(resolved) + 1);
     }
 
-    /* Copy arguments to kernel buffer BEFORE overwriting */
+    /* Copy arguments from user VA to kernel buffer BEFORE overwriting */
     spawn_argc = 0;
-    if (argv != (char **)0) {
-        while (argv[spawn_argc] != (char *)0 && spawn_argc < MAX_ARGC) {
-            len = strlen(argv[spawn_argc]);
-            if (len >= MAX_ARG_LEN) {
-                len = MAX_ARG_LEN - 1;
-            }
-            memcpy(spawn_argv_buf[spawn_argc], argv[spawn_argc], len);
-            spawn_argv_buf[spawn_argc][len] = '\0';
+    if (tf->a1 != 0) {
+        uint32_t *kargv = (uint32_t *)uva_to_pa(current_proc, tf->a1);
+        if (!kargv) return -1;
+        while (kargv[spawn_argc] != 0 && spawn_argc < MAX_ARGC) {
+            if (copyustr(spawn_argv_buf[spawn_argc], kargv[spawn_argc],
+                         MAX_ARG_LEN) < 0)
+                return -1;
             spawn_argc++;
         }
     }
 
-    /* Copy envp to process env if provided */
-    if (envp != (char **)0) {
+    /* Copy envp from user VA to process env if provided */
+    if (tf->a2 != 0) {
+        uint32_t *kenvp = (uint32_t *)uva_to_pa(current_proc, tf->a2);
+        if (!kenvp) return -1;
         int envc = 0;
         cur->env_count = 0;
-        while (envp[envc] != (char *)0 && envc < MAX_ENVC) {
-            len = strlen(envp[envc]);
-            if (len >= MAX_ENV_LEN) {
-                len = MAX_ENV_LEN - 1;
-            }
-            memcpy(cur->env[envc], envp[envc], len);
-            cur->env[envc][len] = '\0';
+        while (kenvp[envc] != 0 && envc < MAX_ENVC) {
+            if (copyustr(cur->env[envc], kenvp[envc], MAX_ENV_LEN) < 0)
+                return -1;
             envc++;
         }
         cur->env_count = envc;
@@ -755,8 +799,8 @@ static int32_t sys_exec(trap_frame_t *tf) {
     }
     proc_set_name(cur, spawn_path_buf);
 
-    /* Set up the new stack with arguments (use virtual addresses) */
-    setup_user_stack(USER_STACK_TOP, &sp, &argv_addr);
+    /* Set up the new stack with arguments (writes to physical, returns VAs) */
+    setup_user_stack(cur->mem_base, &sp, &argv_addr);
 
     /* Reset trap frame for new program (keep c_trap_sp, c_trap) */
     cur->tf.mepc = USER_VA_BASE + (info.entry_point - cur->mem_base);
@@ -901,15 +945,19 @@ static int32_t sys_dup2(trap_frame_t *tf) {
  * Returns: 0 on success, -1 on error
  */
 static int32_t sys_pipe(trap_frame_t *tf) {
-    int *pipefd = (int *)tf->a0;
+    int *pipefd;
     int pipe_idx;
     int read_fd, write_fd;
     struct fd_entry *fds = proc_table[current_proc].fds;
     int i;
 
-    if (pipefd == (int *)0) {
+    if (tf->a0 == 0) {
         return -1;
     }
+
+    /* Translate user pipefd array to kernel-accessible address */
+    pipefd = (int *)user_to_kern(tf->a0, 2 * sizeof(int));
+    if (!pipefd) return -1;
 
     /* Find two free fds */
     read_fd = -1;
@@ -1012,15 +1060,23 @@ static int resolve_parent(const char *path, uint32_t *parent_ino, const char **n
  * Returns: number of entries read, or negative error
  */
 static int32_t sys_readdir(trap_frame_t *tf) {
-    const char *path = (const char *)tf->a0;
+    char kpath[MAX_ARG_LEN];
     char resolved[MAX_ARG_LEN];
-    struct dirent *entries = (struct dirent *)tf->a1;
     uint32_t max_entries = tf->a2;
+    struct dirent *entries;
     uint32_t ino;
     uint32_t count;
 
+    /* Copy path from user space */
+    if (copyustr(kpath, tf->a0, MAX_ARG_LEN) < 0) return -1;
+
+    /* Translate user dirent buffer to kernel-accessible address */
+    entries = (struct dirent *)user_to_kern(tf->a1,
+        max_entries * sizeof(struct dirent));
+    if (!entries) return -1;
+
     /* Resolve relative path to absolute */
-    if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
+    if (resolve_path(kpath, resolved, MAX_ARG_LEN) < 0) {
         return FS_ERR_INVALID;
     }
 
@@ -1045,13 +1101,15 @@ static int32_t sys_readdir(trap_frame_t *tf) {
  * Returns: 0 on success, negative error
  */
 static int32_t sys_mkdir(trap_frame_t *tf) {
-    const char *path = (const char *)tf->a0;
+    char kpath[MAX_ARG_LEN];
     char resolved[MAX_ARG_LEN];
     uint32_t parent_ino;
     const char *name;
 
+    if (copyustr(kpath, tf->a0, MAX_ARG_LEN) < 0) return -1;
+
     /* Resolve relative path to absolute */
-    if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
+    if (resolve_path(kpath, resolved, MAX_ARG_LEN) < 0) {
         return FS_ERR_INVALID;
     }
 
@@ -1069,13 +1127,15 @@ static int32_t sys_mkdir(trap_frame_t *tf) {
  * Returns: 0 on success, negative error
  */
 static int32_t sys_rmdir(trap_frame_t *tf) {
-    const char *path = (const char *)tf->a0;
+    char kpath[MAX_ARG_LEN];
     char resolved[MAX_ARG_LEN];
     uint32_t parent_ino;
     const char *name;
 
+    if (copyustr(kpath, tf->a0, MAX_ARG_LEN) < 0) return -1;
+
     /* Resolve relative path to absolute */
-    if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
+    if (resolve_path(kpath, resolved, MAX_ARG_LEN) < 0) {
         return FS_ERR_INVALID;
     }
 
@@ -1093,15 +1153,17 @@ static int32_t sys_rmdir(trap_frame_t *tf) {
  * Returns: 0 on success, negative error
  */
 static int32_t sys_mknod(trap_frame_t *tf) {
-    const char *path = (const char *)tf->a0;
+    char kpath[MAX_ARG_LEN];
     char resolved[MAX_ARG_LEN];
     uint8_t major = (uint8_t)tf->a1;
     uint8_t minor = (uint8_t)tf->a2;
     uint32_t parent_ino;
     const char *name;
 
+    if (copyustr(kpath, tf->a0, MAX_ARG_LEN) < 0) return -1;
+
     /* Resolve relative path to absolute */
-    if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
+    if (resolve_path(kpath, resolved, MAX_ARG_LEN) < 0) {
         return FS_ERR_INVALID;
     }
 
@@ -1120,14 +1182,16 @@ static int32_t sys_mknod(trap_frame_t *tf) {
  * Returns: 0 on success, negative error
  */
 static int32_t sys_chdir(trap_frame_t *tf) {
-    const char *path = (const char *)tf->a0;
+    char kpath[MAX_ARG_LEN];
     char resolved[MAX_ARG_LEN];
     uint32_t ino;
     uint8_t type;
     int result;
 
+    if (copyustr(kpath, tf->a0, MAX_ARG_LEN) < 0) return -1;
+
     /* Resolve to absolute path */
-    if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
+    if (resolve_path(kpath, resolved, MAX_ARG_LEN) < 0) {
         return FS_ERR_INVALID;
     }
 
@@ -1158,20 +1222,25 @@ static int32_t sys_chdir(trap_frame_t *tf) {
  * Returns: 0 on success, -1 on error
  */
 static int32_t sys_setenv(trap_frame_t *tf) {
-    const char *name = (const char *)tf->a0;
-    const char *value = (const char *)tf->a1;
+    char kname[MAX_ARG_LEN];
+    char kvalue[MAX_ARG_LEN];
     struct process *p = &proc_table[current_proc];
-    int nlen = strlen(name);
-    int vlen = strlen(value);
+    int nlen, vlen;
     int idx;
     char *s;
+
+    if (copyustr(kname, tf->a0, MAX_ARG_LEN) < 0) return -1;
+    if (copyustr(kvalue, tf->a1, MAX_ARG_LEN) < 0) return -1;
+
+    nlen = strlen(kname);
+    vlen = strlen(kvalue);
 
     if (nlen + 1 + vlen >= MAX_ENV_LEN) {
         vlen = MAX_ENV_LEN - nlen - 2;
         if (vlen < 0) return -1;
     }
 
-    idx = proc_env_find(current_proc, name);
+    idx = proc_env_find(current_proc, kname);
     if (idx < 0) {
         /* New entry */
         if (p->env_count >= MAX_ENVC) return -1;
@@ -1180,9 +1249,9 @@ static int32_t sys_setenv(trap_frame_t *tf) {
 
     /* Build "NAME=value" */
     s = p->env[idx];
-    memcpy(s, name, nlen);
+    memcpy(s, kname, nlen);
     s[nlen] = '=';
-    memcpy(s + nlen + 1, value, vlen);
+    memcpy(s + nlen + 1, kvalue, vlen);
     s[nlen + 1 + vlen] = '\0';
     return 0;
 }
@@ -1194,8 +1263,7 @@ static int32_t sys_setenv(trap_frame_t *tf) {
  * Returns: length of value on success, -1 if not found
  */
 static int32_t sys_getenv(trap_frame_t *tf) {
-    const char *name = (const char *)tf->a0;
-    char *buf = (char *)tf->a1;
+    char kname[MAX_ARG_LEN];
     uint32_t buflen = tf->a2;
     struct process *p = &proc_table[current_proc];
     int idx;
@@ -1203,7 +1271,9 @@ static int32_t sys_getenv(trap_frame_t *tf) {
     char *value;
     int vlen;
 
-    idx = proc_env_find(current_proc, name);
+    if (copyustr(kname, tf->a0, MAX_ARG_LEN) < 0) return -1;
+
+    idx = proc_env_find(current_proc, kname);
     if (idx < 0) return -1;
 
     eq = strchr(p->env[idx], '=');
@@ -1211,11 +1281,13 @@ static int32_t sys_getenv(trap_frame_t *tf) {
     value = eq + 1;
     vlen = strlen(value);
 
-    if (buf != (char *)0 && buflen > 0) {
+    if (tf->a1 != 0 && buflen > 0) {
+        char *kbuf = (char *)user_to_kern(tf->a1, buflen);
+        if (!kbuf) return -1;
         int copy = vlen;
         if (copy >= (int)buflen) copy = (int)buflen - 1;
-        memcpy(buf, value, copy);
-        buf[copy] = '\0';
+        memcpy(kbuf, value, copy);
+        kbuf[copy] = '\0';
     }
 
     return vlen;
@@ -1227,9 +1299,12 @@ static int32_t sys_getenv(trap_frame_t *tf) {
  * Returns: 0 on success, -1 if not found
  */
 static int32_t sys_unsetenv(trap_frame_t *tf) {
-    const char *name = (const char *)tf->a0;
+    char kname[MAX_ARG_LEN];
     struct process *p = &proc_table[current_proc];
-    int idx = proc_env_find(current_proc, name);
+    int idx;
+
+    if (copyustr(kname, tf->a0, MAX_ARG_LEN) < 0) return -1;
+    idx = proc_env_find(current_proc, kname);
     if (idx < 0) return -1;
 
     /* Compact: move last entry into this slot */
@@ -1255,7 +1330,6 @@ static int32_t sys_getenv_count(void) {
  */
 static int32_t sys_getenv_entry(trap_frame_t *tf) {
     int index = (int)tf->a0;
-    char *buf = (char *)tf->a1;
     uint32_t buflen = tf->a2;
     struct process *p = &proc_table[current_proc];
     int len;
@@ -1263,11 +1337,13 @@ static int32_t sys_getenv_entry(trap_frame_t *tf) {
     if (index < 0 || index >= p->env_count) return -1;
 
     len = strlen(p->env[index]);
-    if (buf != (char *)0 && buflen > 0) {
+    if (tf->a1 != 0 && buflen > 0) {
+        char *kbuf = (char *)user_to_kern(tf->a1, buflen);
+        if (!kbuf) return -1;
         int copy = len;
         if (copy >= (int)buflen) copy = (int)buflen - 1;
-        memcpy(buf, p->env[index], copy);
-        buf[copy] = '\0';
+        memcpy(kbuf, p->env[index], copy);
+        kbuf[copy] = '\0';
     }
     return len;
 }
@@ -1278,12 +1354,14 @@ static int32_t sys_getenv_entry(trap_frame_t *tf) {
  * Returns: 0 on success, negative error
  */
 static int32_t sys_unlink(trap_frame_t *tf) {
-    const char *path = (const char *)tf->a0;
+    char kpath[MAX_ARG_LEN];
     char resolved[MAX_ARG_LEN];
     uint32_t parent_ino;
     const char *name;
 
-    if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
+    if (copyustr(kpath, tf->a0, MAX_ARG_LEN) < 0) return -1;
+
+    if (resolve_path(kpath, resolved, MAX_ARG_LEN) < 0) {
         return FS_ERR_INVALID;
     }
 
@@ -1301,8 +1379,8 @@ static int32_t sys_unlink(trap_frame_t *tf) {
  * Returns: 0 on success, negative error
  */
 static int32_t sys_link(trap_frame_t *tf) {
-    const char *target = (const char *)tf->a0;
-    const char *linkpath = (const char *)tf->a1;
+    char ktarget[MAX_ARG_LEN];
+    char klinkpath[MAX_ARG_LEN];
     char resolved_target[MAX_ARG_LEN];
     char resolved_link[MAX_ARG_LEN];
     uint32_t target_ino;
@@ -1310,7 +1388,10 @@ static int32_t sys_link(trap_frame_t *tf) {
     const char *link_name;
     struct inode in;
 
-    if (resolve_path(target, resolved_target, MAX_ARG_LEN) < 0) {
+    if (copyustr(ktarget, tf->a0, MAX_ARG_LEN) < 0) return -1;
+    if (copyustr(klinkpath, tf->a1, MAX_ARG_LEN) < 0) return -1;
+
+    if (resolve_path(ktarget, resolved_target, MAX_ARG_LEN) < 0) {
         return FS_ERR_INVALID;
     }
     int result = fs_open(resolved_target, &target_ino);
@@ -1325,7 +1406,7 @@ static int32_t sys_link(trap_frame_t *tf) {
         return FS_ERR_INVALID;
     }
 
-    if (resolve_path(linkpath, resolved_link, MAX_ARG_LEN) < 0) {
+    if (resolve_path(klinkpath, resolved_link, MAX_ARG_LEN) < 0) {
         return FS_ERR_INVALID;
     }
     result = resolve_parent(resolved_link, &link_parent_ino, &link_name);
@@ -1348,15 +1429,18 @@ static int32_t sys_link(trap_frame_t *tf) {
  * Returns: 0 on success, negative error
  */
 static int32_t sys_rename(trap_frame_t *tf) {
-    const char *oldpath = (const char *)tf->a0;
-    const char *newpath = (const char *)tf->a1;
+    char koldpath[MAX_ARG_LEN];
+    char knewpath[MAX_ARG_LEN];
     char resolved_old[MAX_ARG_LEN];
     char resolved_new[MAX_ARG_LEN];
     uint32_t old_parent_ino, new_parent_ino;
     const char *old_name, *new_name;
     uint32_t file_ino;
 
-    if (resolve_path(oldpath, resolved_old, MAX_ARG_LEN) < 0) {
+    if (copyustr(koldpath, tf->a0, MAX_ARG_LEN) < 0) return -1;
+    if (copyustr(knewpath, tf->a1, MAX_ARG_LEN) < 0) return -1;
+
+    if (resolve_path(koldpath, resolved_old, MAX_ARG_LEN) < 0) {
         return FS_ERR_INVALID;
     }
     int result = resolve_parent(resolved_old, &old_parent_ino, &old_name);
@@ -1369,7 +1453,7 @@ static int32_t sys_rename(trap_frame_t *tf) {
         return result;
     }
 
-    if (resolve_path(newpath, resolved_new, MAX_ARG_LEN) < 0) {
+    if (resolve_path(knewpath, resolved_new, MAX_ARG_LEN) < 0) {
         return FS_ERR_INVALID;
     }
     result = resolve_parent(resolved_new, &new_parent_ino, &new_name);
@@ -1403,13 +1487,19 @@ static int32_t sys_rename(trap_frame_t *tf) {
  * Returns: 0 on success, negative error
  */
 static int32_t sys_stat(trap_frame_t *tf) {
-    const char *path = (const char *)tf->a0;
-    struct stat_info *si = (struct stat_info *)tf->a1;
+    char kpath[MAX_ARG_LEN];
     char resolved[MAX_ARG_LEN];
+    struct stat_info *si;
     uint32_t ino;
     struct inode in;
 
-    if (resolve_path(path, resolved, MAX_ARG_LEN) < 0) {
+    if (copyustr(kpath, tf->a0, MAX_ARG_LEN) < 0) return -1;
+
+    /* Translate user stat_info buffer */
+    si = (struct stat_info *)user_to_kern(tf->a1, sizeof(struct stat_info));
+    if (!si) return -1;
+
+    if (resolve_path(kpath, resolved, MAX_ARG_LEN) < 0) {
         return FS_ERR_INVALID;
     }
 
@@ -1470,23 +1560,28 @@ static int32_t sys_kill(trap_frame_t *tf) {
  * Returns: number of entries filled
  */
 static int32_t sys_ps(trap_frame_t *tf) {
-    struct proc_info *buf = (struct proc_info *)tf->a0;
     int max_entries = (int)tf->a1;
+    struct proc_info *kbuf;
     int count = 0;
     int i;
 
+    /* Translate user buffer to kernel-accessible address */
+    kbuf = (struct proc_info *)user_to_kern(tf->a0,
+        max_entries * sizeof(struct proc_info));
+    if (!kbuf) return -1;
+
     for (i = 0; i < MAX_PROCS && count < max_entries; i++) {
         if (proc_table[i].state != PROC_FREE) {
-            buf[count].pid = proc_table[i].pid;
-            buf[count].state = proc_table[i].state;
+            kbuf[count].pid = proc_table[i].pid;
+            kbuf[count].state = proc_table[i].state;
             /* Convert parent slot index to PID (-1 stays as -1) */
-            buf[count].parent = (proc_table[i].parent >= 0)
+            kbuf[count].parent = (proc_table[i].parent >= 0)
                 ? proc_table[proc_table[i].parent].pid : -1;
             /* Copy program name */
             int j;
             for (j = 0; j < 31 && proc_table[i].name[j]; j++)
-                buf[count].name[j] = proc_table[i].name[j];
-            buf[count].name[j] = '\0';
+                kbuf[count].name[j] = proc_table[i].name[j];
+            kbuf[count].name[j] = '\0';
             count++;
         }
     }
@@ -1512,24 +1607,33 @@ static int32_t sys_shmget(trap_frame_t *tf) {
 /*
  * sys_shmat - Attach to shared memory segment
  * a0 = shm_id (segment index)
- * Returns: physical address of segment, 0 on error
+ * Returns: virtual address of segment (at SHM_VA_BASE + offset), 0 on error
+ *
+ * Maps the segment's physical page into the process's page table at
+ * SHM_VA_BASE + shm_id * SHM_SEG_SIZE.
  */
 static int32_t sys_shmat(trap_frame_t *tf) {
     int shm_id = (int)tf->a0;
-    uint32_t addr;
+    uint32_t pa;
+    uint32_t va;
 
     if (shm_id < 0 || shm_id >= MAX_SHM) return 0;
 
-    /* Already attached — just return the address */
+    va = SHM_VA_BASE + shm_id * SHM_SEG_SIZE;
+
+    /* Already attached — just return the virtual address */
     if (proc_table[current_proc].shm_attached & (1 << shm_id)) {
-        return (int32_t)shm_table[shm_id].addr;
+        return (int32_t)va;
     }
 
-    addr = shm_attach(shm_id);
-    if (addr != 0) {
+    pa = shm_attach(shm_id);
+    if (pa != 0) {
         proc_table[current_proc].shm_attached |= (uint8_t)(1 << shm_id);
+        /* Map the shared memory page into the process's address space */
+        map_page(proc_table[current_proc].pt_root_pa, va, pa, PTE_USER_RW);
+        sfence_vma();
     }
-    return (int32_t)addr;
+    return (pa != 0) ? (int32_t)va : 0;
 }
 
 /*
@@ -1546,6 +1650,10 @@ static int32_t sys_shmdt(trap_frame_t *tf) {
     }
 
     proc_table[current_proc].shm_attached &= (uint8_t)~(1 << shm_id);
+    /* Unmap the shared memory page from the process's address space */
+    unmap_page(proc_table[current_proc].pt_root_pa,
+               SHM_VA_BASE + shm_id * SHM_SEG_SIZE);
+    sfence_vma();
     shm_detach(shm_id);
     return 0;
 }

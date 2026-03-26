@@ -41,6 +41,7 @@ int file_create(uint32_t dir_ino, const char *name) {
     struct inode in;
     memset(&in, 0, INODE_SIZE);
     in.type = FT_FILE;
+    in.link_count = 1;
     in.size = 0;
 
     if (inode_write(ino, &in) != FS_OK) {

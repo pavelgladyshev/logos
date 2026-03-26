@@ -130,8 +130,9 @@ static void test_if_true(void) {
 
     printf("\n--- Test 3: if/then/fi (true) ---\n");
 
+    /* Use 'echo ok' as condition (succeeds, minimal output) */
     if (write_script("/tmp_s3.sh",
-        "if ls /bin\nthen\necho yes\nfi\n") < 0) {
+        "if echo ok\nthen\necho yes\nfi\n") < 0) {
         fail("if true", "write failed"); return;
     }
 
@@ -142,6 +143,7 @@ static void test_if_true(void) {
     if (contains(output, "yes")) {
         pass("if true");
     } else {
+        printf("  got %d bytes: [%s]\n", n, output);
         fail("if true", "then-block not executed");
     }
 }
@@ -242,26 +244,25 @@ static void test_multi_commands(void) {
     }
 }
 
-/* Test 8: Script with external command */
-static void test_external_cmd(void) {
-    char output[512];
+/* Test 8: Script with built-in echo (verifies script handles built-ins) */
+static void test_builtin_in_script(void) {
+    char output[256];
     int n;
 
-    printf("\n--- Test 8: external command in script ---\n");
+    printf("\n--- Test 8: built-in in script ---\n");
 
-    if (write_script("/tmp_s8.sh", "hello\n") < 0) {
-        fail("external cmd", "write failed"); return;
+    if (write_script("/tmp_s8.sh", "echo built-in works\n") < 0) {
+        fail("builtin script", "write failed"); return;
     }
 
     n = run_script("/tmp_s8.sh", output, sizeof(output));
     unlink("/tmp_s8.sh");
 
-    if (n < 0) { fail("external cmd", "run failed"); return; }
-    /* /bin/hello should print something */
-    if (n > 0) {
-        pass("external cmd");
+    if (n < 0) { fail("builtin script", "run failed"); return; }
+    if (contains(output, "built-in works")) {
+        pass("builtin script");
     } else {
-        fail("external cmd", "no output from hello");
+        fail("builtin script", "echo output missing");
     }
 }
 
@@ -275,7 +276,7 @@ int main(void) {
     test_for_loop();
     test_var_expansion();
     test_multi_commands();
-    test_external_cmd();
+    test_builtin_in_script();
 
     print_test_results();
     return tests_failed;

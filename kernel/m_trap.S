@@ -31,8 +31,11 @@
     .globl m_trap_handler
     .align 4
 m_trap_handler:
-    /* Save t0-t2 using mscratch as temporary storage */
+    /* Save t0 and t1 — we use both in the timer handler.
+     * t0 is saved in mscratch, t1 is saved on the stack. */
     csrw mscratch, t0
+    addi sp, sp, -4
+    sw   t1, 0(sp)
 
     /* Check if this is a timer interrupt (mcause = 0x80000007) */
     csrr t0, mcause
@@ -54,13 +57,17 @@ m_trap_handler:
     li   t0, (1 << 1)         /* SSIP bit */
     csrs mip, t0              /* Set SSIP — S-mode will see this as software interrupt */
 
-    /* Restore t0 and return */
+    /* Restore t1 and t0, then return */
+    lw   t1, 0(sp)
+    addi sp, sp, 4
     csrr t0, mscratch
     mret
 
 m_trap_unexpected:
     /* Unexpected trap in M-mode — should not happen if delegation is correct */
     /* Halt (infinite loop) */
+    lw   t1, 0(sp)
+    addi sp, sp, 4
     csrr t0, mscratch         /* restore t0 before halting */
     j    m_trap_unexpected
 

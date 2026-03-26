@@ -31,12 +31,11 @@ make check-pie            # Check user programs for PIE compatibility issues
 ## Running
 
 ```bash
-# Logisim (requires Java and Logisim Evolution)
-java -jar ~/logisim-evolution-ucd-4.1.0-all.jar computer.circ -t tty
+# Logisim command-line mode (requires Java and Logisim Evolution UCD)
+java -jar ../git/logisim-evolution-ucd/build/libs/logisim-evolution-ucd-4.1.1-all.jar computer.circ -tty raw
 
-# QEMU (alternative - compiles for RV64)
-make qemu                 # Run in QEMU with serial console
-make qemu-gdb             # Run in QEMU, wait for GDB at localhost:1234
+# Logisim GUI mode
+java -jar ../git/logisim-evolution-ucd/build/libs/logisim-evolution-ucd-4.1.1-all.jar computer.circ
 ```
 
 Note: Before running Logisim without GUI, you must first load the bootloader ROM image (`boot-rom.txt`) into the ROM component and the filesystem image (`block_storage.bin`) into the block device via the GUI, then save the circuit.
@@ -59,7 +58,8 @@ Key modules organized by directory:
 | File | `file.c/h` | Create/delete files, read/write data, truncate |
 | Filesystem | `fs.c/h` | Format, mount, open paths (absolute), superblock access |
 | Device | `device.c/h`, `console_dev.c/h` | Character device driver framework, console driver |
-| Trap Handling | `trap.S`, `trap.h` | Assembly trap handler, context save/restore |
+| Trap Handling | `trap.S`, `m_trap.S`, `trap.h` | S-mode trap handler, M-mode timer/IPI forwarder, context save/restore |
+| Virtual Memory | `vm.c/h` | SV32 page tables, copyin/copyout/copyinstr, user VA translation |
 | Process Mgmt | `process.c/h` | Process table, slot allocation, per-process state |
 | Pipes | `pipe.c/h` | Kernel-buffered IPC pipes with reference counting |
 | Shared Memory | `shm.c/h` | Fixed-size (4KB) shared memory segments, key-based API |
@@ -91,6 +91,7 @@ Key modules organized by directory:
   - ...
   - Slot 7: 0x00148000-0x0014FFFF
 - 0x00150000-0x00157FFF: Shared memory segments (8 × 4KB)
+- 0x00158000-0x00177FFF: Page table pool (32 × 4KB pages for SV32 page tables)
 - 0x001F0000-0x001FEFFF: Bootloader BSS (60KB, used only during boot)
 - 0x001FFFFC: Initial stack pointer (shared by bootloader and kernel)
 - 0x00200000: Block device MMIO
@@ -236,6 +237,36 @@ Each program runs in its own fixed 32KB memory slot with a per-process trap fram
 
 **Environment:** Per-process, stored in `struct process`. Each process has its own `env[MAX_ENVC][MAX_ENV_LEN]` array. On `fork()` or `spawn()`, the child inherits a copy of the parent's environment. Changes to env in a child do not affect the parent (Unix semantics). CWD is also per-process.
 
+## Virtual Memory
+
+The kernel uses RISC-V SV32 paging (2-level page tables, 4KB pages, 4MB megapages). Each process has its own page table with a unique ASID. The kernel runs in S-mode with virtual memory enabled.
+
+**Address space layout (per-process):**
+- `0x00000000-0x003FFFFF`: Kernel megapage (identity-mapped, S-mode only)
+- `0x00400000-0x00407FFF`: User code/data (32KB slot mapped to process's physical slot)
+- `0x00500000+`: Shared memory segments (mapped on `shmat`, 4KB each)
+- `0xFFC00000-0xFFFFFFFF`: MMIO megapage (identity-mapped, S-mode only)
+
+**Key constants** (`vm.h`):
+- `USER_VA_BASE = 0x00400000` — all user programs are loaded at this virtual address
+- `SHM_VA_BASE = 0x00500000` — shared memory segments mapped here
+- `PT_POOL_BASE = 0x00158000` — physical memory pool for page table pages (32 × 4KB)
+
+**Page table management:**
+- `setup_process_vm(slot)` — allocates page table root + L0 tables, maps kernel/MMIO megapages and user slot
+- `pt_free_all(root_pa)` — returns all page table pages to the pool
+- `map_page/unmap_page` — 4KB page mappings (used for user code and SHM segments)
+- `map_megapage` — 4MB superpage mappings (used for kernel and MMIO identity maps)
+
+**User pointer translation** (syscall boundary):
+- `uva_to_pa(proc, uva)` — translates user virtual address to physical address
+- `copyin/copyout/copyinstr` — safe kernel↔user memory copy via page table walk
+- All syscalls use `copyinstr` for user string arguments and `copyin`/`copyout` for buffers
+
+**Privilege modes:** Boot in M-mode → kernel drops to S-mode (`drop_to_smode` in `main.c`) → user programs run in U-mode. M-mode retains a minimal trap handler (`m_trap.S`) that forwards timer interrupts to S-mode via SSIP and handles ecalls from S-mode.
+
+**Known limitation:** Running external programs from within shell scripts (3+ levels of fork nesting) can cause the shell to crash. Built-in commands work fine in scripts.
+
 ## Writing User Programs
 
 User programs use the user-space library (`user/libc.h`) which provides syscall wrappers:
@@ -288,7 +319,7 @@ Build produces user programs that are added to the filesystem image:
 - `/bin/proc_test` — Process tests (fork, multi-wait, exec errors, getpid, kill, ps, env isolation, slot exhaustion)
 - `/bin/stress_test` — Stress tests (many files, large file, pipe/fd/shm/sem exhaustion, nested dirs, fork+pipe)
 - `/bin/link_test` — Hard link and rename tests (link/unlink, link count, rename within/across dirs, error cases)
-- `/bin/script_test` — Shell script tests (echo, comments, if/then/else, for loop, variables, external commands)
+- `/bin/script_test` — Shell script tests (echo, comments, if/then/else, for loop, variables, built-in commands in scripts)
 
 ## Shell
 

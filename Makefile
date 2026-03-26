@@ -20,7 +20,6 @@ RISCV_TOOL_PREFIX = /opt/homebrew/bin/riscv64-elf-
 RISCV_ISA = rv32im_zicsr
 RISCV_ABI = ilp32
 CFLAGS = -Wno-builtin-declaration-mismatch
-QEMU_APP = qemu-system-riscv64
 NATIVE_CC = gcc
 BUILD_DIR = build
 
@@ -201,30 +200,6 @@ fs-image: $(FSTOOL_BIN) $(BUILD_DIR)/kernel.bin $(USER_ELFS) | $(BUILD_DIR)
 	@echo "Filesystem image created."
 
 # ====================================
-# QEMU support (compiles kernel for RV64)
-# ====================================
-
-QEMU_EXECUTABLE = $(BUILD_DIR)/fs
-
-QEMU_KERNEL_OBJS = $(KERNEL_OBJS)
-
-compile-for-qemu: RISCV_ISA=rv64g
-compile-for-qemu: RISCV_ABI=lp64
-compile-for-qemu: CFLAGS+=-DQEMU20180
-compile-for-qemu: clean-kernel $(QEMU_EXECUTABLE)
-
-$(QEMU_EXECUTABLE): $(QEMU_KERNEL_OBJS) | $(BUILD_DIR)
-	$(RISCV_TOOL_PREFIX)ld -nostdlib -o $(QEMU_EXECUTABLE) -Map $(BUILD_DIR)/fs.map -T kernel/qemu.lds $(QEMU_KERNEL_OBJS)
-	$(RISCV_TOOL_PREFIX)objdump -S $(QEMU_EXECUTABLE) > $(BUILD_DIR)/fs.asm
-	$(RISCV_TOOL_PREFIX)nm $(QEMU_EXECUTABLE) > $(BUILD_DIR)/fs.sym
-
-qemu: compile-for-qemu
-	$(QEMU_APP) -machine virt -kernel $(QEMU_EXECUTABLE) -bios none -serial stdio
-
-qemu-gdb: compile-for-qemu
-	$(QEMU_APP) -s -S -machine virt -kernel $(QEMU_EXECUTABLE) -bios none -serial stdio
-
-# ====================================
 # Build everything
 # ====================================
 
@@ -253,4 +228,4 @@ clean-all: clean clean-user clean-fstool
 	rm -f boot-rom boot-rom.txt block_storage.bin
 
 .PHONY: all clean clean-all clean-boot clean-kernel clean-user clean-fstool \
-        fs-image fstool user-programs check-pie compile-for-qemu qemu qemu-gdb
+        fs-image fstool user-programs check-pie
