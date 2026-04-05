@@ -18,6 +18,10 @@
 
 static uint8_t pt_pool_bitmap[PT_POOL_PAGES];
 
+/* Shared L0 page tables (allocated once, reused by all processes) */
+static uint32_t kern_l0_pa;  /* L0 for VPN1=0: kernel identity mappings */
+static uint32_t mmio_l0_pa;  /* L0 for VPN1=1023: console MMIO */
+
 void vm_init(void)
 {
     int i;
@@ -25,6 +29,41 @@ void vm_init(void)
     for (i = 0; i < PT_POOL_PAGES; i++)
         pt_pool_bitmap[i] = 0;
     printf("VM: page table pool at 0x%x (%d pages)\n", PT_POOL_BASE, PT_POOL_PAGES);
+}
+
+void vm_build_shared_l0(void)
+{
+    uint32_t *l0;
+    int i;
+
+    /* --- Kernel L0 (VPN1=0): identity-map 0x00000000-0x003FFFFF --- */
+    kern_l0_pa = pt_alloc();
+    l0 = (uint32_t *)kern_l0_pa;
+
+    /* ROM: 0x00000000-0x0000FFFF (pages 0-15) */
+    for (i = 0; i <= 15; i++)
+        l0[i] = MAKE_PTE(PA_TO_PPN(i * PAGE_SIZE), PTE_KERN_RWX);
+
+    /* Kernel + process slots + SHM + PT pool: 0x00100000-0x00177FFF (pages 256-375) */
+    for (i = 256; i <= 375; i++)
+        l0[i] = MAKE_PTE(PA_TO_PPN(i * PAGE_SIZE), PTE_KERN_RWX);
+
+    /* Bootloader BSS + stack: 0x001F0000-0x001FFFFF (pages 496-511) */
+    for (i = 496; i <= 511; i++)
+        l0[i] = MAKE_PTE(PA_TO_PPN(i * PAGE_SIZE), PTE_KERN_RWX);
+
+    /* Block device MMIO: 0x00200000 (page 512) */
+    l0[512] = MAKE_PTE(PA_TO_PPN(512 * PAGE_SIZE), PTE_KERN_RW);
+
+    /* --- MMIO L0 (VPN1=1023): identity-map console at 0xFFFF0xxx --- */
+    mmio_l0_pa = pt_alloc();
+    l0 = (uint32_t *)mmio_l0_pa;
+
+    /* Console MMIO: 0xFFFF0000 (VPN0 = 1008) */
+    l0[1008] = MAKE_PTE(PA_TO_PPN(0xFFFF0000), PTE_KERN_RW);
+
+    printf("VM: shared L0 tables built (kern=0x%x, mmio=0x%x)\n",
+           kern_l0_pa, mmio_l0_pa);
 }
 
 uint32_t pt_alloc(void)
@@ -66,7 +105,9 @@ void pt_free_all(uint32_t root_pa)
         /* If not a leaf (R/W/X all zero), it's a pointer to L0 table */
         if (!(pte & (PTE_R | PTE_W | PTE_X))) {
             uint32_t l0_pa = PPN_TO_PA(PTE_PPN(pte));
-            pt_free(l0_pa);
+            /* Don't free shared kernel/MMIO L0 tables */
+            if (l0_pa != kern_l0_pa && l0_pa != mmio_l0_pa)
+                pt_free(l0_pa);
         }
     }
     /* Free the root table itself */
@@ -105,15 +146,6 @@ int map_page(uint32_t root_pa, uint32_t va, uint32_t pa, uint32_t flags)
     return 0;
 }
 
-int map_megapage(uint32_t root_pa, uint32_t va, uint32_t pa, uint32_t flags)
-{
-    uint32_t *root = (uint32_t *)root_pa;
-    uint32_t vpn1 = VA_VPN1(va);
-    /* Megapage: L1 leaf entry. PPN[0] portion of pa must be 0 (4MB aligned) */
-    root[vpn1] = MAKE_PTE(PA_TO_PPN(pa), flags);
-    return 0;
-}
-
 int map_range(uint32_t root_pa, uint32_t va_start, uint32_t pa_start,
               uint32_t size, uint32_t flags)
 {
@@ -148,24 +180,20 @@ void unmap_page(uint32_t root_pa, uint32_t va)
 void build_kernel_mappings(uint32_t root_pa)
 {
     /*
-     * Identity-map kernel and system regions (no U bit) using megapages.
-     * Megapages are critical for performance — the Logisim TLB is small and
-     * direct-mapped, so 4KB page mappings cause severe TLB thrashing.
+     * Install shared L0 page tables for kernel identity mappings.
+     * These L0 tables are built once by vm_build_shared_l0() and reused
+     * by every process, saving page table pool entries.
      *
-     * L1[0]: 0x00000000-0x003FFFFF megapage (kernel + PT pool + block MMIO)
-     *        Supervisor-only (no U bit). Covers ROM, kernel, SHM, PT pool.
-     *        Process slots (0x110000-0x14FFFF) are also covered but without
-     *        U bit — user code cannot execute here. User code is mapped
-     *        separately at USER_VA_BASE (different L1 entry) via build_user_mappings().
+     * L1[0] -> kern_l0: ROM, kernel, process slots, SHM, PT pool, block MMIO
+     *          Supervisor-only (no U bit). Process slots are also covered
+     *          but without U bit — user code accesses its slot via
+     *          USER_VA_BASE (different L1 entry) in build_user_mappings().
      *
-     * L1[1023]: 0xFFC00000-0xFFFFFFFF megapage (console MMIO at 0xFFFF0xxx)
+     * L1[1023] -> mmio_l0: Console MMIO at 0xFFFF0xxx
      */
-
-    /* 0x00000000-0x003FFFFF: kernel megapage (supervisor-only) */
-    map_megapage(root_pa, 0x00000000, 0x00000000, PTE_KERN_RWX);
-
-    /* 0xFFC00000-0xFFFFFFFF: console MMIO megapage (supervisor-only) */
-    map_megapage(root_pa, 0xFFC00000, 0xFFC00000, PTE_KERN_RW);
+    uint32_t *root = (uint32_t *)root_pa;
+    root[0] = MAKE_PTE(PA_TO_PPN(kern_l0_pa), PTE_V);
+    root[1023] = MAKE_PTE(PA_TO_PPN(mmio_l0_pa), PTE_V);
 }
 
 void build_user_mappings(uint32_t root_pa, int slot)

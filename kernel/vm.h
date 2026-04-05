@@ -83,6 +83,14 @@
 void vm_init(void);
 
 /*
+ * Build shared L0 page tables for kernel identity mappings.
+ * Must be called once after vm_init(), before any setup_process_vm().
+ * Allocates two L0 tables (kernel regions + console MMIO) that are
+ * reused by every process page table.
+ */
+void vm_build_shared_l0(void);
+
+/*
  * Allocate a zeroed 4KB page from the pool.
  * Returns physical address, or 0 on failure.
  */
@@ -105,12 +113,6 @@ void pt_free_all(uint32_t root_pa);
  * Returns 0 on success, -1 on failure.
  */
 int map_page(uint32_t root_pa, uint32_t va, uint32_t pa, uint32_t flags);
-
-/*
- * Map a 4MB megapage (L1 leaf entry): va -> pa with given flags.
- * va and pa must be 4MB-aligned.
- */
-int map_megapage(uint32_t root_pa, uint32_t va, uint32_t pa, uint32_t flags);
 
 /*
  * Map a contiguous range of 4KB pages.

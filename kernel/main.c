@@ -207,6 +207,7 @@ int main(void)
     console_dev_init();
     proc_init();
     vm_init();
+    vm_build_shared_l0();
 
     result = fs_mount();
     if (result != FS_OK) {
