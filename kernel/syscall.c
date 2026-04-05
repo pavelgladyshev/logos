@@ -139,7 +139,20 @@ static int sys_exit(trap_frame_t *tf) {
             }
         }
 
-        /* Parent exists but is not waiting for us — become zombie */
+        /* Parent exists but is not waiting for us — become zombie.
+         * Close pipe fds first so readers/writers get EOF/EPIPE wakeups.
+         * Other resources (SHM, sems, page tables) are kept until
+         * the parent collects the zombie via wait(). */
+        {
+            int fd_i;
+            for (fd_i = 0; fd_i < MAX_FD; fd_i++) {
+                if (cur->fds[fd_i].in_use && cur->fds[fd_i].type == FT_PIPE) {
+                    pipe_close_fd((int)cur->fds[fd_i].inode,
+                                  (int)cur->fds[fd_i].minor);
+                    cur->fds[fd_i].in_use = 0;
+                }
+            }
+        }
         cur->state = PROC_ZOMBIE;
         schedule();  /* never returns */
     }

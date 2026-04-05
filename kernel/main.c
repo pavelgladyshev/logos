@@ -21,15 +21,11 @@
 #include "syscall.h"
 #include "process.h"
 #include "vm.h"
+#include "timer.h"
 
 /* Kernel trap stack - used when handling traps from user programs */
 #define TRAP_STACK_SIZE 4096
 static uint8_t trap_stack[TRAP_STACK_SIZE] __attribute__((aligned(16)));
-
-/* Timer MMIO registers (also used by M-mode handler in m_trap.S) */
-#define TIMER_MTIME    ((volatile uint32_t *)0x200bff8)
-#define TIMER_MTIMECMP ((volatile uint32_t *)0x2004000)
-#define TIME_SLICE     800
 
 /* Flag to indicate the current top-level program has exited */
 volatile int program_should_exit = 0;

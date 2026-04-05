@@ -70,7 +70,6 @@ void set_trap_handler(void (*handler)(void), trap_frame_t *tf);
  * Read/write machine interrupt enable register (mie).
  */
 void set_mie(uint32_t mie_value);
-uint32_t get_mie(void);
 
 /*
  * Set bits in mstatus register.

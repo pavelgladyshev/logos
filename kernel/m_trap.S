@@ -24,9 +24,10 @@
  * delegated) — halt with an error.
  */
 
-#define TIMER_MTIME     0x200bff8
-#define TIMER_MTIMECMP  0x2004000
-#define TIME_SLICE      800
+#include "timer.h"
+
+#define TIMER_MTIME     TIMER_MTIME_ADDR
+#define TIMER_MTIMECMP  TIMER_MTIMECMP_ADDR
 
     .globl m_trap_handler
     .align 4

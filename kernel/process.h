@@ -115,12 +115,6 @@ void proc_set_env(int slot, const char *name, const char *value);
 void proc_set_env_int(int slot, const char *name, int value);
 
 /*
- * Initialize timer interrupts for preemptive scheduling.
- * Enables timer and external interrupt sources, sets first alarm.
- */
-void timer_init(void);
-
-/*
  * Round-robin scheduler — select next PROC_READY process and switch to it.
  * Sets selected process to PROC_RUNNING. Never returns (calls trap_ret).
  * Caller must set outgoing process state before calling.

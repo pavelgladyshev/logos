@@ -12,11 +12,7 @@
 #include "string.h"
 #include "trap.h"
 #include "vm.h"
-
-/* Timer MMIO registers */
-#define TIMER_MTIME    ((volatile uint32_t *)0x200bff8)
-#define TIMER_MTIMECMP ((volatile uint32_t *)0x2004000)
-#define TIME_SLICE     800
+#include "timer.h"
 
 /* Global process table */
 struct process proc_table[MAX_PROCS];
@@ -205,15 +201,6 @@ void proc_set_env_int(int slot, const char *name, int value) {
     }
     buf[pos] = '\0';
     proc_set_env(slot, name, buf);
-}
-
-void timer_init(void) {
-    /* Enable timer (bit 7) and external (bit 11) interrupt sources */
-    set_mie(0x880);
-    /* Set first timer alarm */
-    *TIMER_MTIMECMP = *TIMER_MTIME + TIME_SLICE;
-    /* Set MPIE so interrupts become enabled on mret */
-    set_mstatus_bit(0x80);
 }
 
 void schedule(void) {

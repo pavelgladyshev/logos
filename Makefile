@@ -79,7 +79,8 @@ KERNEL_HEADERS = kernel/fs.h kernel/types.h kernel/fs_types.h kernel/string.h \
                  kernel/console.h kernel/block.h kernel/inode.h kernel/dir.h \
                  kernel/file.h kernel/device.h kernel/console_dev.h kernel/elf.h \
                  kernel/loader.h kernel/trap.h kernel/vm.h kernel/syscall.h \
-                 kernel/process.h kernel/pipe.h kernel/shm.h kernel/sem.h
+                 kernel/process.h kernel/pipe.h kernel/shm.h kernel/sem.h \
+                 kernel/timer.h
 
 kernel/%.o: kernel/%.c $(KERNEL_HEADERS)
 	$(RISCV_TOOL_PREFIX)gcc $(RISCV_CFLAGS) -Ikernel -c $< -o $@

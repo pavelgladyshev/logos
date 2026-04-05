@@ -37,10 +37,6 @@ set_mie:
     csrw mie, a0
     ret
 
-    .globl get_mie
-get_mie:
-    csrr a0, mie
-    ret
 
 /*
  * void set_mstatus_bit(uint32_t mask)

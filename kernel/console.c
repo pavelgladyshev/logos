@@ -75,9 +75,11 @@ void printf(const char *fmt, ...) {
         if (*fmt == '%') {
             fmt++;
             switch (*fmt) {
-                case 's':
-                    puts(va_arg(ap, const char*));
+                case 's': {
+                    const char *s = va_arg(ap, const char*);
+                    while (*s) putchar(*s++);
                     break;
+                }
                 case 'd':
                     put_int(va_arg(ap, int));
                     break;
