@@ -1,0 +1,17 @@
+idf_component_register(
+    SRCS
+        "logOS.c"
+        "logos_start.c"
+        "components/shell/shell.c"
+        "components/kernel/block.c"
+        "components/kernel/device.c"
+        "components/kernel/dir.c"
+        "components/kernel/file.c"
+        "components/kernel/fs_alloc.c"
+        "components/kernel/fs.c"
+        "components/kernel/inode.c"
+    INCLUDE_DIRS
+        "."
+        "components/kernel"
+        "components/shell"
+)
