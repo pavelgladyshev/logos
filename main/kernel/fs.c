@@ -6,6 +6,7 @@
  */
 
 #include "fs.h"
+#include <stdio.h>
 
 /* Global filesystem state */
 struct superblock sb;
@@ -98,6 +99,7 @@ int fs_format(uint32_t total_blocks) {
  * Filesystem mount
  */
 int fs_mount(void) {
+    printf("in fs mount\n");
     /* Read superblock */
     if (block_read(0, &sb) != FS_OK) {
         return FS_ERR_IO;

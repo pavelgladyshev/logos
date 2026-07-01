@@ -19,7 +19,7 @@
 #define PROC_READY   2   /* Suspended (parent waiting for child to exit) */
 
 /* Process table limits */
-#define MAX_PROCS       8
+#define MAX_PROCS       3
 
 /* Memory layout: 64KB fixed slots starting after kernel BSS */
 #define PROC_SLOT_SIZE  0x10000     /* 64KB per process */

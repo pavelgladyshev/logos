@@ -7,6 +7,7 @@
 #include "console_dev.h"  /* for CONSOLE_MAJOR */
 #include "fs_types.h"     /* for FT_CHARDEV */
 #include "string.h"
+#include <stdio.h>
 
 /* Global process table */
 struct process proc_table[MAX_PROCS];
@@ -17,13 +18,29 @@ static int next_pid = 1;
 
 void proc_init(void) {
     int i;
+
+
     for (i = 0; i < MAX_PROCS; i++) {
         proc_table[i].state = PROC_FREE;
         proc_table[i].pid = 0;
         proc_table[i].parent = -1;
         proc_table[i].exit_code = 0;
-        proc_table[i].mem_base = PROC_SLOT_BASE(i);
-        proc_table[i].stack_top = PROC_SLOT_STACK(i);
+        //proc_table[i].mem_base = PROC_SLOT_BASE(i);
+        //proc_table[i].stack_top = PROC_SLOT_STACK(i);
+        //proc_table[i].mem_base =(uint32_t) (&(proc_table[i]));
+        //proc_table[i].stack_top =proc_table[i].mem_base+(PROC_SLOT_SIZE - 0x100);
+
+        //ESP32
+        char *proc_memory = (char *)malloc( PROC_SLOT_SIZE);
+        if(proc_memory == NULL){
+            printf("error! error! error!\n");
+        }
+        else{
+            printf("proc memory: %p\n",proc_memory);
+        }
+        proc_table[i].mem_base = (uint32_t)(&(proc_memory[i * PROC_SLOT_SIZE]));
+        proc_table[i].stack_top= proc_table[i].mem_base+(PROC_SLOT_SIZE - 0x100);
+
     }
 }
 

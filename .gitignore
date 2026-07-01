@@ -1,37 +1,5 @@
-# Build artifacts - object files
-*.o
+build/
 
-# Build artifacts - binaries and debug ELFs
-*.elf
-*.bin
-*.asm
-*.sym
-*.map
+managed_components/
 
-# Bootloader build outputs
-bootloader
-boot-rom
-boot-rom.txt
-
-# Filesystem image
-block_storage.bin
-
-# fstool binary
-fstool/fstool
-
-# Logisim ROM data
-fs-rom
-fs-rom.txt
-
-# Legacy/test files
-rom_data_formatted.txt
-test.bin
-
-# macOS
-.DS_Store
-
-# IDE
-.vscode/
-
-# Claude Code
-.claude/
+*.old

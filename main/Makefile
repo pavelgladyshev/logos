@@ -15,7 +15,7 @@
 # Common configuration
 # ====================================
 
-RISCV_TOOL_PREFIX = /opt/homebrew/bin/riscv64-elf-
+RISCV_TOOL_PREFIX = riscv64-none-elf-
 RISCV_ISA = rv32im_zicsr
 RISCV_ABI = ilp32
 CFLAGS = -Wno-builtin-declaration-mismatch
@@ -330,6 +330,29 @@ qemu-gdb: compile-for-qemu
 # ====================================
 
 all: boot-rom.txt fs-image
+
+
+ESP_SOURCES = logosTest2.c kernel/fs.h kernel/types.h kernel/fs_types.h kernel/string.h \
+ kernel/console.h kernel/block.h kernel/inode.h kernel/dir.h \
+ kernel/file.h kernel/device.h kernel/elf.h \
+ kernel/loader.h kernel/trap.h kernel/syscall.h kernel/process.h \
+ kernel/esp32_block.c kernel/dir.c kernel/fs.c \
+ kernel/loader.c kernel/process.c kernel/syscall.c \
+ kernel/device.c kernel/file.c kernel/inode.c kernel/main.c \
+ kernel/crt0.S kernel/loader_asm.S kernel/trap.S
+
+
+
+esp32: fs-image
+	@INNER_CMAKE="idf_component_register(SRCS \n"; \
+	OUTER_CMAKE='cmake_minimum_required(VERSION 3.16) \n include($$ENV{IDF_PATH}/tools/cmake/project.cmake) \n project(logosTest2) \n idf_build_set_property(COMPILE_DEFINITIONS "ESP32" APPEND)'; \
+	for item in $(ESP_SOURCES); do \
+		INNER_CMAKE+="\"$$item\" \n"; \
+	done; \
+	INNER_CMAKE+="INCLUDE_DIRS \".\")\n littlefs_create_partition_image(storage ../flash_data FLASH_IN_PROJECT)"; \
+	echo -e "$$INNER_CMAKE" > CMakeLists.txt; \
+	echo -e "$$OUTER_CMAKE" > ../CMakeLists.txt; \
+	cp "block_storage.bin" "../flash_data/"
 
 # ====================================
 # Clean targets

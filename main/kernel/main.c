@@ -8,11 +8,12 @@
 
 #include "fs.h"
 #include "console.h"
-#include "console_dev.h"
+//#include "console_dev.h"
 #include "loader.h"
 #include "trap.h"
 #include "syscall.h"
 #include "process.h"
+
 
 /* Kernel trap stack - used when handling traps from user programs */
 #define TRAP_STACK_SIZE 4096
@@ -33,6 +34,7 @@ extern int run_user_program(trap_frame_t *tf);
  */
 void c_trap_handler(trap_frame_t *tf) {
     uint32_t cause = get_mcause();
+    //printf("mcause: %lx\n",cause);
 
     if (cause == 11) {
         /* System call (ecall) - dispatch it */
@@ -44,11 +46,20 @@ void c_trap_handler(trap_frame_t *tf) {
         }
         /* Normal syscall - return to user program */
         trap_ret(tf);
-    } else if (cause & MCAUSE_INTERRUPT) {
+    } 
+    else if (cause & MCAUSE_INTERRUPT) {
+#ifdef ESP32
+        printf("KERNEL: Unexpected interrupt, mcause=0x%lx\n", cause);
+#else
         printf("KERNEL: Unexpected interrupt, mcause=0x%x\n", cause);
+#endif
         trap_ret(tf);
     } else {
-        printf("KERNEL: Exception! mcause=%d, mepc=0x%x\n", cause, tf->mepc);
+#ifdef ESP32
+        printf("KERNEL: Exception! mcause=%ld, mepc=0x%lx\n", cause, tf->mepc);
+#else
+        printf("KERNEL: Exception! mcause=%ld, mepc=0x%x\n", cause, tf->mepc);
+#endif
         printf("KERNEL: Halting.\n");
         while (1) {}
     }
@@ -64,7 +75,7 @@ static void setup_trap_frame(int slot) {
     p->tf.c_trap = (uint32_t)c_trap_handler;
 }
 
-int main(void)
+int start_main(void)
 {
     int result;
     struct program_info info;
@@ -73,7 +84,7 @@ int main(void)
     printf("Welcome to logOS Belfield 1.0!\n\n");
 
     /* Initialize subsystems */
-    console_dev_init();
+    //console_dev_init();
     proc_init();
 
     /* Mount the filesystem */
@@ -104,6 +115,8 @@ int main(void)
         proc_set_env_int(slot, "?", last_exit_code);
 
         /* Load shell into this process slot */
+        printf("loading shell\n");
+        printf("process pointer: %p\n",p);
         result = elf_load_at("/bin/sh", p->mem_base, PROC_SLOT_SIZE, &info);
         if (result != LOAD_OK) {
             printf("ERROR: Failed to load /bin/sh (code %d)\n", result);
@@ -111,6 +124,8 @@ int main(void)
             proc_free(slot);
             while (1) {}
         }
+
+        printf("elf loaded\n");
 
         /* Set up process state */
         setup_trap_frame(slot);
@@ -122,12 +137,15 @@ int main(void)
         p->state = PROC_RUNNING;
         p->parent = -1;  /* No parent — kernel manages shell */
         proc_fd_init(slot);
+        printf("setup process state\n");
 
         /* Start the process */
         current_proc = slot;
         program_should_exit = 0;
         set_trap_handler(trap_handler, &p->tf);
+        printf("setup trap handler\n");
         run_user_program(&p->tf);
+        
 
         /* Shell exited — save exit code for next shell instance */
         last_exit_code = p->exit_code;
@@ -137,3 +155,10 @@ int main(void)
 
     return 0;
 }
+
+
+#ifndef ESP32
+    void main(){
+        start_main();
+    }
+#endif

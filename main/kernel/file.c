@@ -6,6 +6,7 @@
 #include "fs.h"
 #include "fs_globals.h"
 #include "device.h"
+#include <stdio.h>
 
 
 int file_create(uint32_t dir_ino, const char *name) {
@@ -135,9 +136,15 @@ int file_load_direct(uint32_t ino, uint32_t offset, void *buf, uint32_t len) {
         if (block_offset == 0 && chunk == BLOCK_SIZE &&
             (((unsigned long)dst) & 3) == 0) {
             /* Full block, dst 4-byte aligned: DMA directly to destination */
+            //printf("before block read in file read direct\n");
+            //printf("block: %d\n" , in.blocks[block_idx]);
+            //printf("destination: %p\n", dst);
+            //printf("dest value: %c\n", *dst);
+            //fflush(stdout);
             if (block_read(in.blocks[block_idx], dst) != FS_OK) {
                 return FS_ERR_IO;
             }
+            //printf("successful block read in file read direct\n");
         } else {
             /* Partial block or unaligned dst: use intermediate buffer */
             if (block_read(in.blocks[block_idx], block_buf) != FS_OK) {

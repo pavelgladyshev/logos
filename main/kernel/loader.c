@@ -225,6 +225,8 @@ int elf_load_at(const char *path, uint32_t load_addr, uint32_t max_size, struct 
 
     /* Calculate load bias (difference between requested and linked address) */
     load_bias = load_addr - min_vaddr;
+    //printf("load addr: %ld\n",load_addr);
+    //printf("min vaddr: %ld\n",min_vaddr);
 
     /* Initialize program info */
     info->entry_point = ehdr.e_entry + load_bias;
@@ -234,10 +236,12 @@ int elf_load_at(const char *path, uint32_t load_addr, uint32_t max_size, struct 
     /* Second pass: load segments */
     ph_offset = ehdr.e_phoff;
     for (i = 0; i < ehdr.e_phnum; i++) {
+        //printf("reading file in elf load at\n");
         result = file_read(ino, ph_offset, &phdr, sizeof(Elf32_Phdr));
         if (result != sizeof(Elf32_Phdr)) {
             return LOAD_ERR_IO;
         }
+        //printf("successfully loaded file\n");
         ph_offset += ehdr.e_phentsize;
 
         /* Only process loadable segments */
@@ -252,6 +256,9 @@ int elf_load_at(const char *path, uint32_t load_addr, uint32_t max_size, struct 
 
         /* Calculate actual load address with bias */
         uint32_t seg_addr = phdr.p_vaddr + load_bias;
+        //printf("seg addr: %ld\n", seg_addr);
+        //printf("p hdr vaddr: %ld\n", phdr.p_vaddr);
+        //printf("load bias: %ld\n", load_bias);
 
         /* Validate segment address is in valid RAM range */
         if (seg_addr < load_addr) {
@@ -271,10 +278,12 @@ int elf_load_at(const char *path, uint32_t load_addr, uint32_t max_size, struct 
 
         /* Load segment data from file (DMA direct to destination) */
         if (phdr.p_filesz > 0) {
+            //printf("read file direct\n");
             result = file_load_direct(ino, phdr.p_offset, (void *)seg_addr, phdr.p_filesz);
             if (result != (int)phdr.p_filesz) {
                 return LOAD_ERR_IO;
             }
+            //printf("successfully read file direct \n");
         }
 
         /* Zero BSS portion (memsz > filesz) */
