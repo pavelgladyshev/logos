@@ -1,0 +1,27 @@
+//
+
+#ifndef SYSCALL_NR_H
+#define SYSCALL_NR_H
+
+#define SYS_exit          0
+#define SYS_read          1
+#define SYS_write         2
+#define SYS_open          3
+#define SYS_close         4
+#define SYS_spawn         5
+#define SYS_readdir       6
+#define SYS_mkdir         7
+#define SYS_rmdir         8
+#define SYS_mknod         9
+#define SYS_setenv        10
+#define SYS_getenv        11
+#define SYS_unsetenv      12
+#define SYS_getenv_count  13
+#define SYS_getenv_entry  14
+#define SYS_chdir         15
+#define SYS_unlink        16
+#define SYS_link          17
+#define SYS_rename        18
+#define SYS_stat          19
+
+#endif /* SYSCALL_NR_H */

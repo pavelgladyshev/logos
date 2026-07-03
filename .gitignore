@@ -6,6 +6,8 @@
 !sdkconfig
 
 !main/
+!main/**
+main/build/
 !main/CMakeLists.txt
 !main/logOS.c
 !main/logos_start.c
@@ -34,3 +36,16 @@
 !main/components/shell/
 !main/components/shell/shell.c
 !main/components/shell/shell.h
+
+!main/components/user/
+!main/components/user/**
+!main/components/boot/
+!main/components/boot/**
+
+!components/
+!components/esp_system/
+!components/esp_system/**
+
+!bootloader_components/
+!bootloader_components/main/
+!bootloader_components/main/**
