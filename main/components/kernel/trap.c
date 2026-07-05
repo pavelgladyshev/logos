@@ -2,7 +2,7 @@
 
 #include "console.h"
 #include "riscv/rv_utils.h"
-#include "syscalls/syscall.h"
+#include "esp32c3/syscall.h"
 #include "trap.h"
 
 #define MCAUSE_ECALL_M_MODE 11

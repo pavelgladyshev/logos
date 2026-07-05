@@ -1,5 +1,5 @@
 /*
- * Simple Unix-like File System for ESP
+ * Simple Unix-like File System for RISC-V and ESP
  * Licensed under Creative Commons Attribution International License 4.0
  *
  * This implements a minimal file system with:
@@ -16,7 +16,12 @@
 /* Include filesystem type definitions */
 #include "fs_types.h"
 
-#include <string.h>
+/* String functions */
+#if defined NATIVE_BUILD
+    #include <string.h>
+#else
+    #include "string.h"
+#endif
 
 /* Include module headers */
 #include "block.h"

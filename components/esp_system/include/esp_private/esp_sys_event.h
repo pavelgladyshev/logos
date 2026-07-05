@@ -53,6 +53,16 @@ typedef struct {
 #define _ESP_SYS_EVENT_STRINGIFY_INNER(x) #x
 #define _ESP_SYS_EVENT_STRINGIFY(x) _ESP_SYS_EVENT_STRINGIFY_INNER(x)
 
+
+
+//added because it was missing
+//#ifndef CONFIG_IDF_TARGET_LINUX
+//#define _SECTION_ATTR_IMPL_GENERIC(SECTION, COUNTER) __attribute__((section(SECTION "." _COUNTER_STRINGIFY(COUNTER))))
+//#else
+//#define _SECTION_ATTR_IMPL_GENERIC(SECTION, COUNTER)
+//#endif
+
+
 /**
  * @brief Register a static (link-time) handler for an event.
  *

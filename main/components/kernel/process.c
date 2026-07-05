@@ -6,7 +6,7 @@
 #include "process.h"
 #include "console_dev.h"  /* for CONSOLE_MAJOR */
 #include "fs_types.h"     /* for FT_CHARDEV */
-#include "string.h"
+#include <string.h>
 
 /* Global process table */
 struct process proc_table[MAX_PROCS];

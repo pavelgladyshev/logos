@@ -16,12 +16,14 @@ idf_component_register(
         "components/kernel/logos_partition.c"
         "components/kernel/trap.c"
         "components/kernel/trap.S"
-        "components/kernel/syscalls/syscall.c"
-        "components/kernel/syscalls/sys_console.c"
+        "components/kernel/esp32c3/syscall.c"
+        "components/kernel/esp32c3/sys_console.c"
+        #"components/kernel/logos_string.c"
+        #"components/kernel/logos_string.h"
     INCLUDE_DIRS
         "."
         "components/kernel"
-        "components/kernel/syscalls"
+        "components/kernel/esp32c3"
         "components/shell"
         "components/user"
 )

@@ -23,5 +23,5 @@ SECTIONS
     __bss_end = .;
   } > dram
 
-  PROVIDE(__stack_init = 00x3FC9000);
+  PROVIDE(__stack_init = 0x3FC9000);
 }

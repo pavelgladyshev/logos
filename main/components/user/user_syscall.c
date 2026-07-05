@@ -1,5 +1,5 @@
 #include "user_syscall.h"
-#include "syscalls/syscall.h"
+#include "esp32c3/syscall.h"
 #include <stdint.h>
 
 /* Place syscall number/arguments in the RISC-V ABI registers, then trap. */

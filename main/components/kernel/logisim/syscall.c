@@ -14,7 +14,7 @@
 #include "device.h"
 #include "console_dev.h"
 #include "loader.h"
-#include "string.h"
+#include <string.h>
 #include "process.h"
 
 /* Console minor device number */

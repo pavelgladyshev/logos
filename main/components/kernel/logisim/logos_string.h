@@ -1,0 +1,23 @@
+/*
+ * String and memory functions for bare metal RISC-V
+ * Licensed under Creative Commons Attribution International License 4.0
+ */
+
+#ifndef LOGOS_STRING_H
+#define LOGOS_STRING_H
+
+#include "types.h"
+//#include <string.h>
+
+#ifdef ESP32
+#include <string.h>
+#else
+    int   strlen(const char *s);
+    int   strcmp(const char *s1, const char *s2);
+    int   strncmp(const char *s1, const char *s2, uint32_t n);
+    char *strchr(const char *s, int c);
+    void  strcpy(char *dst, const char *src);
+    void  memset(void *dst, int c, uint32_t n);
+    void  memcpy(void *dst, const void *src, uint32_t n);
+#endif
+#endif /* STRING_H */
