@@ -79,14 +79,32 @@ KERNEL_OBJS = $(BUILD_LOGISIM)/kernel/crt0.o $(BUILD_LOGISIM)/kernel/string.o $(
               $(BUILD_LOGISIM)/kernel/loader_asm.o $(BUILD_LOGISIM)/kernel/trap.o $(BUILD_LOGISIM)/kernel/process.o \
               $(BUILD_LOGISIM)/kernel/syscall.o $(BUILD_LOGISIM)/kernel/main.o
 
-KERNEL_HEADERS = kernel/fs.h kernel/types.h kernel/fs_types.h kernel/string.h \
-                 kernel/console.h kernel/block.h kernel/inode.h kernel/dir.h \
-                 kernel/file.h kernel/device.h kernel/display_dev.h kernel/console_dev.h kernel/elf.h \
-                 kernel/loader.h kernel/trap.h kernel/syscall.h kernel/process.h
+KERNEL_HEADERS = kernel/fs.h kernel/types.h kernel/fs_types.h kernel/logisim/string.h \
+                 kernel/logisim/console.h kernel/logisim/block.h kernel/inode.h kernel/dir.h \
+                 kernel/file.h kernel/device.h kernel/logisim/display_dev.h kernel/logisim/console_dev.h kernel/logisim/elf.h \
+                 kernel/logisim/loader.h kernel/logisim/trap.h kernel/logisim/syscall.h kernel/process.h
+
+$(BUILD_LOGISIM)/kernel/crt0.o: kernel/logisim/crt0.S $(KERNEL_HEADERS) | $(BUILD_LOGISIM)/kernel/
+	$(RISCV_TOOL_PREFIX)gcc $(RISCV_CFLAGS) -Ikernel -Ikernel/logisim -c $< -o $@
+
+#$(BUILD_LOGISIM)/kernel/%.o: kernel/logisim/%.S $(KERNEL_HEADERS) | $(BUILD_LOGISIM)/kernel/
+#	$(RISCV_TOOL_PREFIX)gcc $(RISCV_CFLAGS) -Ikernel -Ikernel/logisim -c $< -o $@
+#
+#$(BUILD_LOGISIM)/kernel/%.o: kernel/%.S $(KERNEL_HEADERS) | $(BUILD_LOGISIM)/kernel/
+#	$(RISCV_TOOL_PREFIX)gcc $(RISCV_CFLAGS) -Ikernel -Ikernel/logisim -c $< -o $@
+
+# target-specific assembly (e.g. crt0.S under kernel/<target>/)
+
+$(BUILD_LOGISIM)/kernel/%.o: kernel/logisim/%.c $(KERNEL_HEADERS) | $(BUILD_LOGISIM)/kernel/
+	$(RISCV_TOOL_PREFIX)gcc $(RISCV_CFLAGS) -Ikernel -Ikernel/logisim -c $< -o $@
 
 $(BUILD_LOGISIM)/kernel/%.o: kernel/%.c $(KERNEL_HEADERS) | $(BUILD_LOGISIM)/kernel/
-	$(RISCV_TOOL_PREFIX)gcc $(RISCV_CFLAGS) -Ikernel -c $< -o $@
+	$(RISCV_TOOL_PREFIX)gcc $(RISCV_CFLAGS) -Ikernel -Ikernel/logisim -c $< -o $@
 
+$(BUILD_LOGISIM)/kernel/%.o: kernel/logisim/%.S $(KERNEL_HEADERS) | $(BUILD_LOGISIM)/kernel/
+	$(RISCV_TOOL_PREFIX)gcc $(RISCV_CFLAGS) -Ikernel -Ikernel/logisim -c $< -o $@
+
+# shared/common assembly
 $(BUILD_LOGISIM)/kernel/%.o: kernel/%.S $(KERNEL_HEADERS) | $(BUILD_LOGISIM)/kernel/
 	$(RISCV_TOOL_PREFIX)gcc $(RISCV_CFLAGS) -Ikernel -c $< -o $@
 
@@ -111,8 +129,8 @@ USER_COMMON_OBJS = $(BUILD_LOGISIM)/user/user_crt0.user.o $(USER_LIB_OBJS)
 $(BUILD_LOGISIM)/user/%.user.o: user/%.c user/libc.h | $(BUILD_LOGISIM)/user/
 	$(RISCV_TOOL_PREFIX)gcc $(USER_CFLAGS) -Iuser -c $< -o $@
 
-$(BUILD_LOGISIM)/user/%.user.o: user/%.S kernel/syscall_nr.h | $(BUILD_LOGISIM)/user/
-	$(RISCV_TOOL_PREFIX)gcc $(USER_CFLAGS) -Iuser -Ikernel -c $< -o $@
+$(BUILD_LOGISIM)/user/%.user.o: user/%.S kernel/logisim/syscall_nr.h | $(BUILD_LOGISIM)/user/
+	$(RISCV_TOOL_PREFIX)gcc $(USER_CFLAGS) -Iuser -Ikernel -Ikernel/logisim -c $< -o $@
 
 # Template for building a user program: $(call user-program,name)
 # Expects user/<name>.user.o as program-specific object file.
@@ -127,7 +145,9 @@ $$(BUILD_LOGISIM)/$(1).elf: $$($(1)_OBJS) | $$(BUILD_LOGISIM)/
 	$$(RISCV_TOOL_PREFIX)strip -s $$(BUILD_LOGISIM)/$(1)-debug.elf -o $$(BUILD_LOGISIM)/$(1).elf
 endef
 
-USER_PROGRAMS = hello spawn_demo shell ls mkdir rmdir mknod env_demo print rm dis_test
+#USER_PROGRAMS = hello spawn_demo shell ls mkdir rmdir mknod env_demo print rm dis_test
+
+USER_PROGRAMS = hello shell
 
 $(foreach prog,$(USER_PROGRAMS),$(eval $(call user-program,$(prog))))
 
@@ -162,14 +182,14 @@ FSTOOL_KERNEL_SRCS = kernel/inode.c kernel/dir.c kernel/file.c kernel/fs.c kerne
 FSTOOL_OBJS = $(patsubst %.c,$(BUILD_LOGISIM)/%.native.o,$(FSTOOL_NATIVE_SRCS)) \
               $(patsubst %.c,$(BUILD_LOGISIM)/%.native.o,$(FSTOOL_KERNEL_SRCS))
 
-FSTOOL_HEADERS = kernel/fs.h kernel/fs_types.h kernel/block.h kernel/inode.h \
+FSTOOL_HEADERS = kernel/fs.h kernel/fs_types.h kernel/logisim/block.h kernel/inode.h \
                  kernel/dir.h kernel/file.h fstool/native_block.h
 
 $(BUILD_LOGISIM)/fstool/%.native.o: fstool/%.c $(FSTOOL_HEADERS) | $(BUILD_LOGISIM)/fstool/
-	$(NATIVE_CC) -DNATIVE_BUILD -Wall -Wextra -O2 -iquote kernel -iquote fstool -c $< -o $@
+	$(NATIVE_CC) -DNATIVE_BUILD -Wall -Wextra -O2 -iquote kernel -iquote fstool -iquote kernel/logisim -c $< -o $@
 
 $(BUILD_LOGISIM)/kernel/%.native.o: kernel/%.c $(FSTOOL_HEADERS) | $(BUILD_LOGISIM)/kernel/
-	$(NATIVE_CC) -DNATIVE_BUILD -Wall -Wextra -O2 -iquote kernel -iquote fstool -c $< -o $@
+	$(NATIVE_CC) -DNATIVE_BUILD -Wall -Wextra -O2 -iquote kernel -iquote fstool -iquote kernel/logisim -c $< -o $@
 
 FSTOOL_BIN = $(BUILD_LOGISIM)/fstool/fstool
 
@@ -187,16 +207,16 @@ fs-image: $(FSTOOL_BIN) $(BUILD_LOGISIM)/kernel.bin $(USER_PROGRAM_ELFS)
 	$(FSTOOL_BIN) mkdir block_storage.bin /bin
 	$(FSTOOL_BIN) add block_storage.bin /boot/kernel $(BUILD_LOGISIM)/kernel.bin
 	$(FSTOOL_BIN) add block_storage.bin /bin/hello $(BUILD_LOGISIM)/hello.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/spawn_demo $(BUILD_LOGISIM)/spawn_demo.elf
+#	$(FSTOOL_BIN) add block_storage.bin /bin/spawn_demo $(BUILD_LOGISIM)/spawn_demo.elf
 	$(FSTOOL_BIN) add block_storage.bin /bin/sh $(BUILD_LOGISIM)/shell.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/ls $(BUILD_LOGISIM)/ls.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/mkdir $(BUILD_LOGISIM)/mkdir.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/rmdir $(BUILD_LOGISIM)/rmdir.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/mknod $(BUILD_LOGISIM)/mknod.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/env_demo $(BUILD_LOGISIM)/env_demo.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/print $(BUILD_LOGISIM)/print.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/rm $(BUILD_LOGISIM)/rm.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/dis_test $(BUILD_LOGISIM)/dis_test.elf
+#	$(FSTOOL_BIN) add block_storage.bin /bin/ls $(BUILD_LOGISIM)/ls.elf
+#	$(FSTOOL_BIN) add block_storage.bin /bin/mkdir $(BUILD_LOGISIM)/mkdir.elf
+#	$(FSTOOL_BIN) add block_storage.bin /bin/rmdir $(BUILD_LOGISIM)/rmdir.elf
+#	$(FSTOOL_BIN) add block_storage.bin /bin/mknod $(BUILD_LOGISIM)/mknod.elf
+#	$(FSTOOL_BIN) add block_storage.bin /bin/env_demo $(BUILD_LOGISIM)/env_demo.elf
+#	$(FSTOOL_BIN) add block_storage.bin /bin/print $(BUILD_LOGISIM)/print.elf
+#	$(FSTOOL_BIN) add block_storage.bin /bin/rm $(BUILD_LOGISIM)/rm.elf
+#	$(FSTOOL_BIN) add block_storage.bin /bin/dis_test $(BUILD_LOGISIM)/dis_test.elf
 	@echo "Filesystem image created."
 
 # ====================================

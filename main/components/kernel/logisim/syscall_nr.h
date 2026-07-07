@@ -23,5 +23,6 @@
 #define SYS_link          17
 #define SYS_rename        18
 #define SYS_stat          19
+#define SYS_rmfile        20
 
 #endif /* SYSCALL_NR_H */

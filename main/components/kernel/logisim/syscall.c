@@ -1047,6 +1047,8 @@ int syscall_dispatch(trap_frame_t *tf) {
             result = sys_stat(tf);
             break;
 
+        case SYS_rmfile:
+            break;
         default:
             /* Unknown syscall */
             result = -1;
