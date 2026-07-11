@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "logOS.c"
         "logos_start.c"
+        "start_cpu0.c"
         "components/shell/shell.c"
         "components/user/user_syscall.c"
         "components/kernel/esp32c3/block.c"
@@ -26,4 +27,5 @@ idf_component_register(
         "components/kernel/esp32c3"
         "components/shell"
         "components/user"
+    WHOLE_ARCHIVE
 )
