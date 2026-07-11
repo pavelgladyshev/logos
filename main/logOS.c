@@ -1,6 +1,7 @@
 #include "logos_start.h"
 #include "shell.h"
 #include "trap.h"
+#include "console.h"
 
 /*
  * Entry point used by the custom cpu_start.c path.
@@ -9,9 +10,10 @@
 void kernel_start(void)
 {
     /* Install the kernel trap vector before any code can issue ecall. */
+    kernel_console_printf("Starting trap handler\n");
     trap_install();
 
-    /* Bring up the filesystem/demo state, then enter the interactive shell. */
+    /* Bring up the filesystem/demo state, then enter the built-in shell. */
     logos_start();
     logos_shell_run();
 

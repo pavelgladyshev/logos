@@ -6,6 +6,11 @@
 /* Saved machine context layout. Offsets must match trap.S exactly. */
 typedef struct trap_frame{
 
+    uint32_t reserved;
+    uint32_t c_trap_sp;
+    uint32_t c_trap;
+    uint32_t mepc;
+    uint32_t mstatus;
     uint32_t ra;
     uint32_t sp;
     uint32_t gp;
@@ -38,8 +43,6 @@ typedef struct trap_frame{
     uint32_t t5;
     uint32_t t6;
 
-    uint32_t mepc;
-    uint32_t mstatus;
     uint32_t mcause;
     uint32_t mtval;
 
@@ -49,6 +52,16 @@ typedef struct trap_frame{
 
 void trap_install(void);
 void c_trap_handler(trap_frame_t *tf);
+void set_trap_handler(void (*handler)(void), trap_frame_t *tf);
+void trap_handler(void);
+void trap_ret(trap_frame_t *tf);
+int run_user_program(trap_frame_t *tf);
+uint32_t get_mcause(void);
+void set_mie(uint32_t mie_value);
+uint32_t get_mie(void);
+void set_mstatus_bit(uint32_t mask);
+void enable_interrupts(void);
+void disable_interrupts(void);
 
 #endif /* ifndef TRAP_HANDLER
 #define TRAP_HANDLER
