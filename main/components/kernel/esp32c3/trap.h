@@ -3,6 +3,11 @@
 
 #include <stdint.h>
 
+#define MCAUSE_INTERRUPT  ((uint32_t)0x80000000)  /* Interrupt flag (bit 31) */
+#define MCAUSE_EXTERNAL   ((uint32_t)0xb)         /* External interrupt */
+#define MCAUSE_TIMER      ((uint32_t)0x7)         /* Timer interrupt */
+#define MCAUSE_ECALL      ((uint32_t)0xb)         /* Environment call from M-mode */
+
 /* Saved machine context layout. Offsets must match trap.S exactly. */
 typedef struct trap_frame{
 
@@ -53,9 +58,11 @@ typedef struct trap_frame{
 void trap_install(void);
 void c_trap_handler(trap_frame_t *tf);
 void set_trap_handler(void (*handler)(void), trap_frame_t *tf);
+void kernel_vector_table(void);
 void trap_handler(void);
 void trap_ret(trap_frame_t *tf);
 int run_user_program(trap_frame_t *tf);
+uint32_t get_mtvec(void);
 uint32_t get_mcause(void);
 void set_mie(uint32_t mie_value);
 uint32_t get_mie(void);

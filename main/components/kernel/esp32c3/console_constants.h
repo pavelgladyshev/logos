@@ -1,0 +1,9 @@
+/* ESP32-C3 console device constants. */
+
+#ifndef ESP32C3_CONSOLE_CONSTANTS_H
+#define ESP32C3_CONSOLE_CONSTANTS_H
+
+#define CONSOLE_MAJOR 1
+#define CONSOLE_MINOR 0
+
+#endif /* ESP32C3_CONSOLE_CONSTANTS_H */

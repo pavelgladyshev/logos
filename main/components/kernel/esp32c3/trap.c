@@ -26,7 +26,24 @@ void trap_install(void)
 }
 
 void c_trap_handler(trap_frame_t* tf){
-    kernel_console_printf("trap mcause=%lu mepc=0x%08lx a7=%lu a0=0x%08lx\n",
+      uint32_t cause = get_mcause();
+      static int trap_count = 0;
+
+      if (trap_count < 20) {
+          logos_printf(
+              "TRAP: cause=%u mepc=0x%x a7=%u "
+              "a0=0x%x a1=0x%x a2=%u mtval=0x%x\n",
+              cause,
+              tf->mepc,
+              tf->a7,
+              tf->a0,
+              tf->a1,
+              tf->a2,
+              tf->mtval
+          );
+          trap_count++;
+      }
+    logos_printf("trap mcause=%lu mepc=0x%08lx a7=%lu a0=0x%08lx\n",
                           (unsigned long)tf->mcause,
                           (unsigned long)tf->mepc,
                           (unsigned long)tf->a7,
@@ -41,7 +58,7 @@ void c_trap_handler(trap_frame_t* tf){
     }
 
     /* Anything else is fatal until interrupt/fault handling is expanded. */
-    kernel_console_printf("Unhandled trap: mcause=%lu mepc=0x%08lx ra=0x%08lx mtval=0x%08lx\n",
+    logos_printf("Unhandled trap: mcause=%lu mepc=0x%08lx ra=0x%08lx mtval=0x%08lx\n",
                           (unsigned long)tf->mcause,
                           (unsigned long)tf->mepc,
                           (unsigned long)tf->ra,

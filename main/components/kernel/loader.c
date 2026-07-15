@@ -183,7 +183,7 @@ int elf_load_at(const char *path, uint32_t load_addr, uint32_t max_size, struct 
     uint32_t ph_offset;
     uint16_t i;
     uint32_t load_bias;
-    uint32_t min_vaddr = 0xFFFFFFFF;
+    // uint32_t min_vaddr = 0xFFFFFFFF;
 
     /* Open the executable file */
     result = fs_open(path, &ino);
@@ -203,28 +203,33 @@ int elf_load_at(const char *path, uint32_t load_addr, uint32_t max_size, struct 
         return result;
     }
 
-    /* First pass: find minimum virtual address to calculate load bias */
-    ph_offset = ehdr.e_phoff;
-    for (i = 0; i < ehdr.e_phnum; i++) {
-        result = file_read(ino, ph_offset, &phdr, sizeof(Elf32_Phdr));
-        if (result != sizeof(Elf32_Phdr)) {
-            return LOAD_ERR_IO;
-        }
-        ph_offset += ehdr.e_phentsize;
+    // All commented out since the load bias (dram view) of the proc memory will always be at offset 0 from the base
+    // 
+    // /* First pass: find minimum virtual address to calculate load bias */
+    // logos_printf("test 3\n");
+    // ph_offset = ehdr.e_phoff;
+    // for (i = 0; i < ehdr.e_phnum; i++) {
+    //     result = file_read(ino, ph_offset, &phdr, sizeof(Elf32_Phdr));
+    //     if (result != sizeof(Elf32_Phdr)) {
+    //         return LOAD_ERR_IO;
+    //     }
+    //     ph_offset += ehdr.e_phentsize;
+    //     // commented out vaddr since we need to have 2 seperate offsets within the ELF file we cannot just use a single offset for everything since we need to write through DRAM 
+    //     //     (which would be offset 0 and the min_addr) but also IRAM which is offset (0x700000)
+    //     //     if (phdr.p_vaddr < min_vaddr) {
+    //     //         min_vaddr = phdr.p_vaddr;
+    //     //     }
+    //     // }
+    // }
 
-        if (phdr.p_type == PT_LOAD && phdr.p_memsz > 0) {
-            if (phdr.p_vaddr < min_vaddr) {
-                min_vaddr = phdr.p_vaddr;
-            }
-        }
-    }
-
-    if (min_vaddr == 0xFFFFFFFF) {
-        return LOAD_ERR_FORMAT;
-    }
+    // logos_printf("test 4\n");
+    // if (min_vaddr == 0xFFFFFFFF) {
+    //     return LOAD_ERR_FORMAT;
+    // }
 
     /* Calculate load bias (difference between requested and linked address) */
-    load_bias = load_addr - min_vaddr;
+    // load_bias = load_addr - min_vaddr;
+    load_bias = load_addr;
 
     /* Initialize program info */
     info->entry_point = ehdr.e_entry + load_bias;
@@ -251,7 +256,10 @@ int elf_load_at(const char *path, uint32_t load_addr, uint32_t max_size, struct 
         }
 
         /* Calculate actual load address with bias */
-        uint32_t seg_addr = phdr.p_vaddr + load_bias;
+        // uint32_t seg_addr = phdr.p_vaddr + load_bias;
+
+        //changed p_vaddr to p_paddr since p_paddr is the DRAM view of the proc memory which is where we should load everything and then we execute from IRAM
+        uint32_t seg_addr = phdr.p_paddr + load_bias;
 
         /* Validate segment address is in valid RAM range */
         if (seg_addr < load_addr) {

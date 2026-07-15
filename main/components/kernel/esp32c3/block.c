@@ -4,6 +4,7 @@
  */
 
 #include "block.h"
+#include "console.h"
 #include "fs_types.h"
 #include "logos_partition.h"
 #include <string.h>
@@ -17,6 +18,7 @@ static uint8_t sector_buf[LOGOS_PARTITION_SECTOR_SIZE];
 
 /* Initialize the fixed flash-backed block device used by the filesystem. */
 int block_init(void){
+    logos_printf("Block init called\n");
     if (logos_partition_init() != 0) {
         logosfs_initialized = 0;
         return FS_ERR_IO;
@@ -53,16 +55,14 @@ int block_read(uint32_t block_num, void *buf) {
  * blocks. Preserve the rest of the sector with a read-modify-erase-write cycle.
  */
 int block_write(uint32_t block_num, const void *buf) {
-
     uint32_t block_offset = block_num * BLOCK_SIZE;
     uint32_t sector_offset = (block_offset / LOGOS_PARTITION_SECTOR_SIZE) * LOGOS_PARTITION_SECTOR_SIZE;
     uint32_t within_sector = block_offset - sector_offset;
-
     if(!logosfs_initialized || !buf){
         return FS_ERR_IO;
     }
     if(block_offset + BLOCK_SIZE > logos_partition_size()){
-    return FS_ERR_IO;
+        return FS_ERR_IO;
     }
 
     if(logos_partition_read(sector_offset, sector_buf, LOGOS_PARTITION_SECTOR_SIZE) != 0){

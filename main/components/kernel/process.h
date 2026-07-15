@@ -12,22 +12,12 @@
 #include "types.h"
 #include "trap.h"
 #include "syscall.h"  /* for struct fd_entry, MAX_FD */
+#include "esp32c3/process_constants.h"
 
 /* Process states */
 #define PROC_FREE    0   /* Slot is available */
 #define PROC_RUNNING 1   /* Currently executing on CPU */
 #define PROC_READY   2   /* Suspended (parent waiting for child to exit) */
-
-/* Process table limits */
-#define MAX_PROCS       8
-
-/* Memory layout: 64KB fixed slots starting after kernel BSS */
-#define PROC_SLOT_SIZE  0x10000     /* 64KB per process */
-#define PROC_MEM_START  0x00110000  /* First slot base address */
-
-/* Compute addresses for slot n */
-#define PROC_SLOT_BASE(n)   (PROC_MEM_START + (n) * PROC_SLOT_SIZE)
-#define PROC_SLOT_STACK(n)  (PROC_SLOT_BASE(n) + PROC_SLOT_SIZE - 0x100)
 
 /* Process control block */
 struct process {

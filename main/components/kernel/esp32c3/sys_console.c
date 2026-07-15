@@ -5,12 +5,12 @@
 
 /* Console syscalls are thin wrappers around the kernel console backend. */
 int sys_getchar(void){
-    return kernel_console_getchar();
+    return logos_getchar();
 }
 
 
 int sys_putchar(int ch){
-    kernel_console_putchar((char)ch);
+    logos_putchar((char)ch);
     return ch;
 }
 
@@ -31,5 +31,5 @@ int sys_write(int fd, const void *buf, int len){
         return -1;
     }
 
-    return kernel_console_write(s, len);
+    return logos_write(s, len);
 }

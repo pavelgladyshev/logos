@@ -4,9 +4,12 @@
  */
 
 #include "process.h"
-#include "console_dev.h"  /* for CONSOLE_MAJOR */
+#include "console_constants.h"  /* for CONSOLE_MAJOR */
 #include "fs_types.h"     /* for FT_CHARDEV */
 #include <string.h>
+
+
+unsigned char proc_memory[MAX_PROCS * PROC_SLOT_SIZE] __attribute__((aligned(16)));
 
 /* Global process table */
 struct process proc_table[MAX_PROCS];

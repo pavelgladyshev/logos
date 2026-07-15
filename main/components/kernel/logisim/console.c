@@ -1,109 +1,162 @@
 /*
- * Console output implementation for RISC-V
+ * Console I/O implementation for the Logisim RISC-V target
  * Licensed under Creative Commons Attribution International License 4.0
  */
 
 #include "console.h"
+#include "console_constants.h"
 
-/* Variadic argument handling using GCC builtins (works for bare-metal) */
 typedef __builtin_va_list va_list;
 #define va_start(ap, param) __builtin_va_start(ap, param)
 #define va_arg(ap, type)    __builtin_va_arg(ap, type)
 #define va_end(ap)          __builtin_va_end(ap)
 
-void putchar(int c) {
-    CONSOLE_DATA = (uint32_t)c;
+void logos_putchar(char ch)
+{
+    CONSOLE_DATA = (uint32_t)(uint8_t)ch;
 }
 
-void puts(const char *s) {
-    while (*s) {
-        putchar(*s++);
+int logos_getchar(void)
+{
+    while ((CONSOLE_RCR & 1U) == 0U) {
+        ;
     }
+
+    return (int)(CONSOLE_RDR & 0xffU);
 }
 
-void put_uint(uint32_t n) {
-    char buf[12];
-    int i = 0;
+int logos_write(const void *buf, int len)
+{
+    const uint8_t *src = (const uint8_t *)buf;
 
-    if (n == 0) {
-        putchar('0');
-        return;
+    if (buf == 0 || len < 0) {
+        return -1;
     }
 
-    while (n > 0) {
-        buf[i++] = '0' + (n % 10);
-        n /= 10;
+    for (int i = 0; i < len; ++i) {
+        logos_putchar((char)src[i]);
     }
 
-    while (i > 0) {
-        putchar(buf[--i]);
-    }
+    return len;
 }
 
-void put_int(int n) {
-    if (n < 0) {
-        putchar('-');
-        n = -n;
+static int write_string(const char *s)
+{
+    int written = 0;
+
+    while (*s != '\0') {
+        logos_putchar(*s++);
+        ++written;
     }
-    put_uint((uint32_t)n);
+
+    return written;
 }
 
-void put_hex(uint32_t n) {
-    int i;
+static int write_uint(uint32_t value)
+{
+    char buf[10];
+    int length = 0;
+    int written = 0;
+
+    if (value == 0) {
+        logos_putchar('0');
+        return 1;
+    }
+
+    while (value != 0) {
+        buf[length++] = (char)('0' + value % 10U);
+        value /= 10U;
+    }
+
+    while (length != 0) {
+        logos_putchar(buf[--length]);
+        ++written;
+    }
+
+    return written;
+}
+
+static int write_int(int value)
+{
+    uint32_t magnitude;
+    int written = 0;
+
+    if (value < 0) {
+        logos_putchar('-');
+        written = 1;
+        magnitude = 0U - (uint32_t)value;
+    } else {
+        magnitude = (uint32_t)value;
+    }
+
+    return written + write_uint(magnitude);
+}
+
+static int write_hex(uint32_t value)
+{
+    int written = 0;
     int started = 0;
 
-    for (i = 28; i >= 0; i -= 4) {
-        int digit = (n >> i) & 0xF;
-        if (digit != 0 || started || i == 0) {
-            if (digit < 10) {
-                putchar('0' + digit);
-            } else {
-                putchar('a' + digit - 10);
-            }
+    for (int shift = 28; shift >= 0; shift -= 4) {
+        int digit = (int)((value >> shift) & 0xfU);
+
+        if (digit != 0 || started || shift == 0) {
+            logos_putchar((char)(digit < 10 ? '0' + digit : 'a' + digit - 10));
             started = 1;
+            ++written;
         }
     }
+
+    return written;
 }
 
-/* Simple printf implementation supporting %s, %d, %u, %x, %c, %% */
-void printf(const char *fmt, ...) {
+/* Simple formatter supporting %s, %d, %u, %x, %c, and %%. */
+int logos_printf(const char *fmt, ...)
+{
     va_list ap;
-    va_start(ap, fmt);
+    int written = 0;
 
-    while (*fmt) {
-        if (*fmt == '%') {
-            fmt++;
-            switch (*fmt) {
-                case 's':
-                    puts(va_arg(ap, const char*));
-                    break;
-                case 'd':
-                    put_int(va_arg(ap, int));
-                    break;
-                case 'u':
-                    put_uint(va_arg(ap, uint32_t));
-                    break;
-                case 'x':
-                    put_hex(va_arg(ap, uint32_t));
-                    break;
-                case 'c':
-                    putchar(va_arg(ap, int));
-                    break;
-                case '%':
-                    putchar('%');
-                    break;
-                case '\0':
-                    va_end(ap);
-                    return;
-                default:
-                    putchar('%');
-                    putchar(*fmt);
-                    break;
-            }
-        } else {
-            putchar(*fmt);
+    va_start(ap, fmt);
+    while (*fmt != '\0') {
+        if (*fmt++ != '%') {
+            logos_putchar(fmt[-1]);
+            ++written;
+            continue;
         }
-        fmt++;
+
+        switch (*fmt) {
+        case 's':
+            written += write_string(va_arg(ap, const char *));
+            break;
+        case 'd':
+            written += write_int(va_arg(ap, int));
+            break;
+        case 'u':
+            written += write_uint(va_arg(ap, uint32_t));
+            break;
+        case 'x':
+            written += write_hex(va_arg(ap, uint32_t));
+            break;
+        case 'c':
+            logos_putchar((char)va_arg(ap, int));
+            ++written;
+            break;
+        case '%':
+            logos_putchar('%');
+            ++written;
+            break;
+        case '\0':
+            va_end(ap);
+            return written;
+        default:
+            logos_putchar('%');
+            logos_putchar(*fmt);
+            written += 2;
+            break;
+        }
+        ++fmt;
     }
     va_end(ap);
+
+    return written;
 }

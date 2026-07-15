@@ -6,6 +6,8 @@
  */
 
 #include "fs.h"
+#include "block.h"
+#include "console.h"
 #include <string.h>
 
 /* Global filesystem state */
@@ -19,6 +21,7 @@ int fs_format(uint32_t total_blocks) {
     if (total_blocks > MAX_BLOCKS || total_blocks < 16) {
         return FS_ERR_INVALID;
     }
+    block_init();
 
     /* Calculate layout */
     uint32_t bitmap_blocks = (total_blocks + BLOCK_SIZE * 8 - 1) / (BLOCK_SIZE * 8);
@@ -37,11 +40,12 @@ int fs_format(uint32_t total_blocks) {
     sb.inode_start = 1 + bitmap_blocks;
     sb.inode_blocks = inode_blocks;
     sb.data_start = data_start;
-
+    logos_printf("Before block write\n");
     /* Write superblock */
     if (block_write(0, &sb) != FS_OK) {
         return FS_ERR_IO;
     }
+    logos_printf("After block_write\n");
 
     /* Initialize bitmap - mark metadata blocks as used */
     memset(block_buf, 0, BLOCK_SIZE);
@@ -91,6 +95,7 @@ int fs_format(uint32_t total_blocks) {
     if (dir_add(ROOT_INODE, "..", ROOT_INODE) != FS_OK) {
         return FS_ERR_IO;
     }
+    logos_printf("Format ok\n");
 
     return FS_OK;
 }

@@ -1,5 +1,8 @@
+#include "console.h"
 #include "hal/wdt_hal.h"
 #include "soc/soc_caps.h"
+
+int main();
 
 extern void kernel_start(void) __attribute__((noreturn));
 
@@ -11,6 +14,7 @@ extern void kernel_start(void) __attribute__((noreturn));
  */
 void start_cpu0(void)
 {
+    logos_printf("Start cpu0\n");
 #if SOC_RTC_WDT_SUPPORTED
     /* Normal ESP-IDF startup disables this later; logOS does not reach it. */
     wdt_hal_context_t rtc_wdt = RWDT_HAL_CONTEXT_DEFAULT();
@@ -18,8 +22,10 @@ void start_cpu0(void)
     wdt_hal_write_protect_disable(&rtc_wdt);
     wdt_hal_disable(&rtc_wdt);
     wdt_hal_write_protect_enable(&rtc_wdt);
+    logos_printf("Watchdogs disabled\n");
 #endif
 
-    kernel_start();
+
+    main();
     __builtin_unreachable();
 }

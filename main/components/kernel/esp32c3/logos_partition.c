@@ -1,9 +1,8 @@
 #include "logos_partition.h"
 
-#include <stddef.h>
 
 #include "console.h"
-#include "esp_err.h"
+// #include "esp_err.h"
 #include "esp_flash.h"
 #include "esp_private/esp_flash_internal.h"
 
@@ -23,7 +22,7 @@ static int check_range(uint32_t offset, uint32_t len)
 
 int logos_partition_init(void)
 {
-    esp_err_t err;
+    int err;
 
     /*
      * Normal ESP-IDF reaches this through the registered init_flash function.
@@ -37,7 +36,7 @@ int logos_partition_init(void)
 
     err = esp_flash_init_default_chip();
     if (err != ESP_OK) {
-        kernel_console_printf("logos_partition: esp_flash_init_default_chip failed: 0x%08lx\n",
+        logos_printf("logos_partition: esp_flash_init_default_chip failed: 0x%08lx\n",
                               (unsigned long)err);
         return -1;
     }

@@ -1,19 +1,17 @@
 #include "console.h"
 
-#include <stdarg.h>
-#include <stddef.h>
-#include <stdint.h>
+
 
 #include "esp_rom_serial_output.h"
 #include "esp_rom_sys.h"
 
 /* Output through the ROM console channel selected by early startup. */
-void kernel_console_putchar(char ch)
+void logos_putchar(char ch)
 {
     esp_rom_output_putc(ch);
 }
 
-int kernel_console_getchar(void)
+int logos_getchar(void)
 {
     uint8_t ch;
 
@@ -25,7 +23,7 @@ int kernel_console_getchar(void)
     return ch;
 }
 
-int kernel_console_write(const void *buf, int len)
+int logos_write(const void *buf, int len)
 {
     const unsigned char *s = buf;
 
@@ -35,13 +33,13 @@ int kernel_console_write(const void *buf, int len)
 
     /* Keep write simple and synchronous until the kernel has scheduling. */
     for (int i = 0; i < len; ++i) {
-        kernel_console_putchar((char)s[i]);
+        logos_putchar((char)s[i]);
     }
 
     return len;
 }
 
-int kernel_console_printf(const char *fmt, ...)
+int logos_printf(const char *fmt, ...)
 {
     va_list args;
     int written;

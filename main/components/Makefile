@@ -80,8 +80,8 @@ KERNEL_OBJS = $(BUILD_LOGISIM)/kernel/crt0.o $(BUILD_LOGISIM)/kernel/string.o $(
               $(BUILD_LOGISIM)/kernel/syscall.o $(BUILD_LOGISIM)/kernel/main.o
 
 KERNEL_HEADERS = kernel/fs.h kernel/types.h kernel/fs_types.h kernel/logisim/string.h \
-                 kernel/logisim/console.h kernel/logisim/block.h kernel/inode.h kernel/dir.h \
-                 kernel/file.h kernel/device.h kernel/logisim/display_dev.h kernel/logisim/console_dev.h kernel/logisim/elf.h \
+                 kernel/console.h kernel/logisim/console_constants.h kernel/logisim/block.h kernel/inode.h kernel/dir.h \
+                 kernel/file.h kernel/device.h kernel/logisim/display_dev.h kernel/logisim/elf.h \
                  kernel/logisim/loader.h kernel/logisim/trap.h kernel/logisim/syscall.h kernel/process.h
 
 $(BUILD_LOGISIM)/kernel/crt0.o: kernel/logisim/crt0.S $(KERNEL_HEADERS) | $(BUILD_LOGISIM)/kernel/
@@ -147,7 +147,7 @@ endef
 
 #USER_PROGRAMS = hello spawn_demo shell ls mkdir rmdir mknod env_demo print rm dis_test
 
-USER_PROGRAMS = hello shell
+USER_PROGRAMS = hello shell cat env_demo ls mkdir mknod rm rmdir spawn_demo
 
 $(foreach prog,$(USER_PROGRAMS),$(eval $(call user-program,$(prog))))
 
@@ -207,15 +207,16 @@ fs-image: $(FSTOOL_BIN) $(BUILD_LOGISIM)/kernel.bin $(USER_PROGRAM_ELFS)
 	$(FSTOOL_BIN) mkdir block_storage.bin /bin
 	$(FSTOOL_BIN) add block_storage.bin /boot/kernel $(BUILD_LOGISIM)/kernel.bin
 	$(FSTOOL_BIN) add block_storage.bin /bin/hello $(BUILD_LOGISIM)/hello.elf
-#	$(FSTOOL_BIN) add block_storage.bin /bin/spawn_demo $(BUILD_LOGISIM)/spawn_demo.elf
 	$(FSTOOL_BIN) add block_storage.bin /bin/sh $(BUILD_LOGISIM)/shell.elf
-#	$(FSTOOL_BIN) add block_storage.bin /bin/ls $(BUILD_LOGISIM)/ls.elf
-#	$(FSTOOL_BIN) add block_storage.bin /bin/mkdir $(BUILD_LOGISIM)/mkdir.elf
-#	$(FSTOOL_BIN) add block_storage.bin /bin/rmdir $(BUILD_LOGISIM)/rmdir.elf
-#	$(FSTOOL_BIN) add block_storage.bin /bin/mknod $(BUILD_LOGISIM)/mknod.elf
-#	$(FSTOOL_BIN) add block_storage.bin /bin/env_demo $(BUILD_LOGISIM)/env_demo.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/cat $(BUILD_LOGISIM)/cat.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/env_demo $(BUILD_LOGISIM)/env_demo.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/ls $(BUILD_LOGISIM)/ls.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/mkdir $(BUILD_LOGISIM)/mkdir.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/mknod $(BUILD_LOGISIM)/mknod.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/rm $(BUILD_LOGISIM)/rm.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/rmdir $(BUILD_LOGISIM)/rmdir.elf
+	$(FSTOOL_BIN) add block_storage.bin /bin/spawn_demo $(BUILD_LOGISIM)/spawn_demo.elf
 #	$(FSTOOL_BIN) add block_storage.bin /bin/print $(BUILD_LOGISIM)/print.elf
-#	$(FSTOOL_BIN) add block_storage.bin /bin/rm $(BUILD_LOGISIM)/rm.elf
 #	$(FSTOOL_BIN) add block_storage.bin /bin/dis_test $(BUILD_LOGISIM)/dis_test.elf
 	@echo "Filesystem image created."
 

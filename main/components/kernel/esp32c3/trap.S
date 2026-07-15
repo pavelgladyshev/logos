@@ -44,6 +44,9 @@
 .equ MSTATUS_MPP_MASK,    0x1800
 .equ MSTATUS_MPIE,        0x80
 
+.global _logos_trap_start
+_logos_trap_start:
+
 /*
  * void set_trap_handler(void (*handler)(void), trap_frame_t *tf)
  *
@@ -53,6 +56,7 @@
 .global set_trap_handler
 .type set_trap_handler, @function
 set_trap_handler:
+    ori a0, a0, 1
     csrw mtvec, a0
     csrw mscratch, a1
     ret
@@ -61,6 +65,12 @@ set_trap_handler:
 .type set_mie, @function
 set_mie:
     csrw mie, a0
+    ret
+
+.global get_mtvec
+.type get_mtvec, @function
+get_mtvec:
+    csrr a0, mtvec
     ret
 
 .global get_mie
@@ -95,13 +105,12 @@ get_mcause:
 
 .global kernel_vector_table
 .type kernel_vector_table, @function
-    .balign 4
+    .balign 0x100
 kernel_vector_table:
     j trap_handler
 
 .global trap_handler
 .type trap_handler, @function
-    .balign 4
 trap_handler:
     /*
      * a0 becomes the active trap_frame pointer. mscratch temporarily holds
@@ -153,6 +162,13 @@ trap_handler:
     sw t0, TF_A0_OFFSET(a0)
 
     lw sp, TF_C_TRAP_SP_OFFSET(a0)
+
+    /* Kernel C code must run with the kernel's global and thread pointers,
+     * not the values restored for the interrupted process. */
+    la t0, kernel_context
+    lw gp, 4(t0)
+    lw tp, 8(t0)
+
     lw t0, TF_C_TRAP_OFFSET(a0)
     jalr ra, t0, 0
 
@@ -230,6 +246,8 @@ run_user_program:
 
     la   t0, kernel_context
     sw   sp, 0(t0)
+    sw   gp, 4(t0)
+    sw   tp, 8(t0)
     j    trap_ret
 
 restore_kernel_context:
@@ -251,20 +269,17 @@ restore_kernel_context:
     li   a0, 0
     ret
 
-.global debug_user_entry
-.type debug_user_entry, @function
     .balign 4
-debug_user_entry:
-    li a7, 99
-    ecall
-1:
-    j 1b
+.global _logos_trap_end
+_logos_trap_end:
 
 .option pop
 
 .section .bss
 .align 4
 kernel_context:
-    .word 0
+    .word 0 /* kernel sp */
+    .word 0 /* kernel gp */
+    .word 0 /* kernel tp */
 
 .section .note.GNU-stack,"",@progbits

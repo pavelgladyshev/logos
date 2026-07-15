@@ -1,14 +1,5 @@
 CompileFlags:
-  CompilationDatabase: .
-  Add:
-    - -isystem
-    - /home/david-laptop/.espressif/tools/riscv32-esp-elf/esp-16.1.0_20260609/riscv32-esp-elf/lib/gcc/riscv32-esp-elf/16.1.0/include
-    - -isystem
-    - /home/david-laptop/.espressif/tools/riscv32-esp-elf/esp-16.1.0_20260609/riscv32-esp-elf/picolibc/riscv32-esp-elf/sys-include
-    - -I/home/david-laptop/Coding/logOS-project/esp-idf/components/esp_system/port/include
-  Remove:
-    - -fno-shrink-wrap
-    - -fstrict-volatile-bitfields
-    - -fno-tree-switch-conversion
-    - -fzero-init-padding-bits=all
-    - -fno-malloc-dce
+  # ESP-IDF writes the current compilation database into the build tree.
+  # Keeping this pointed at the project root made clangd consume a stale copy
+  # with paths from the old source layout.
+  CompilationDatabase: build
