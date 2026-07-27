@@ -88,6 +88,7 @@ int logos_seed_filesystem(void)
             return bin_ino;
         }
     } else {
+        logos_printf("seeding error\n");
         return result;
     }
 

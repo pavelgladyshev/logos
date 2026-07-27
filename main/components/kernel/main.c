@@ -89,6 +89,12 @@ int main(void)
 
     /* Preserve an existing filesystem; format only uninitialized storage. */
     logos_printf("Mounting filesystem...\n");
+
+    /////////
+    //had to do this because somehow the file system had gotten corrupted and would not mount
+    //uint32_t blocks = (uint32_t)block_count();
+    //result = fs_format(blocks);
+    /////////
     result = fs_mount();
     if (result != FS_OK) {
         uint32_t blocks = (uint32_t)block_count();
@@ -109,6 +115,7 @@ int main(void)
         }
     }
 
+    logos_printf("seeding file system\n");
     /* Install built-in programs if this filesystem predates their addition. */
     result = logos_seed_filesystem();
     if (result != FS_OK) {
