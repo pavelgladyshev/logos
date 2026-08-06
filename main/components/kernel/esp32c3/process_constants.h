@@ -3,7 +3,7 @@
 #ifndef PROCESS_CONSTANTS_H
 #define PROCESS_CONSTANTS_H
 
-#define MAX_PROCS       2
+#define MAX_PROCS       3
 #define PROC_SLOT_SIZE  0x10000
 
 extern unsigned char proc_memory[MAX_PROCS * PROC_SLOT_SIZE]; 

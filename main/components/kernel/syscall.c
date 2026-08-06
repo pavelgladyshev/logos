@@ -16,6 +16,8 @@
 #include <string.h>
 #include "process.h"
 
+#include "console.h"
+
 /*
  * Get a file descriptor entry for the current process.
  * Returns pointer to fd_entry, or NULL if fd is invalid.
@@ -331,6 +333,7 @@ static int spawn_argc;
  * On failure: returns negative error code to caller.
  */
 static int32_t sys_spawn(trap_frame_t *tf) {
+
     const char *path = (const char *)tf->a0;
     char **argv = (char **)tf->a1;
     char **envp = (char **)tf->a2;
@@ -343,6 +346,7 @@ static int32_t sys_spawn(trap_frame_t *tf) {
     struct process *child;
     int i, len;
 
+
     /* Copy path to kernel buffer (caller's memory stays intact, but
      * we need a kernel copy for resolve_path to work with) */
     len = strlen(path);
@@ -351,6 +355,8 @@ static int32_t sys_spawn(trap_frame_t *tf) {
     }
     memcpy(spawn_path_buf, path, len);
     spawn_path_buf[len] = '\0';
+
+    
 
     /* Resolve relative path to absolute */
     {
