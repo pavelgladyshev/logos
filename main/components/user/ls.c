@@ -15,6 +15,8 @@ int main(int argc, char *argv[])
         printf("ls: cannot list '%s': error %d\n", path, count);
         return 1;
     }
-    for (i = 0; i < count; i++) printf("%s\n", entries[i].name);
+    for (i = 0; i < count; i++) {
+        puts(entries[i].name);
+    }
     return 0;
 }

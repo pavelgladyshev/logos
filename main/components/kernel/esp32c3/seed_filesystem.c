@@ -13,14 +13,36 @@ extern const uint8_t hello_elf_start[] asm("_binary_logos_hello_elf_start");
 extern const uint8_t hello_elf_end[] asm("_binary_logos_hello_elf_end");
 extern const uint8_t cat_elf_start[] asm("_binary_logos_cat_elf_start");
 extern const uint8_t cat_elf_end[] asm("_binary_logos_cat_elf_end");
+extern const uint8_t cp_elf_start[] asm("_binary_logos_cp_elf_start");
+extern const uint8_t cp_elf_end[] asm("_binary_logos_cp_elf_end");
+extern const uint8_t ed_elf_start[] asm("_binary_logos_ed_elf_start");
+extern const uint8_t ed_elf_end[] asm("_binary_logos_ed_elf_end");
 extern const uint8_t env_demo_elf_start[] asm("_binary_logos_env_demo_elf_start");
 extern const uint8_t env_demo_elf_end[] asm("_binary_logos_env_demo_elf_end");
+extern const uint8_t fd_test_elf_start[] asm("_binary_logos_fd_test_elf_start");
+extern const uint8_t fd_test_elf_end[] asm("_binary_logos_fd_test_elf_end");
+extern const uint8_t fork_demo_elf_start[] asm("_binary_logos_fork_demo_elf_start");
+extern const uint8_t fork_demo_elf_end[] asm("_binary_logos_fork_demo_elf_end");
+extern const uint8_t kill_elf_start[] asm("_binary_logos_kill_elf_start");
+extern const uint8_t kill_elf_end[] asm("_binary_logos_kill_elf_end");
+extern const uint8_t ln_elf_start[] asm("_binary_logos_ln_elf_start");
+extern const uint8_t ln_elf_end[] asm("_binary_logos_ln_elf_end");
 extern const uint8_t ls_elf_start[] asm("_binary_logos_ls_elf_start");
 extern const uint8_t ls_elf_end[] asm("_binary_logos_ls_elf_end");
 extern const uint8_t mkdir_elf_start[] asm("_binary_logos_mkdir_elf_start");
 extern const uint8_t mkdir_elf_end[] asm("_binary_logos_mkdir_elf_end");
 extern const uint8_t mknod_elf_start[] asm("_binary_logos_mknod_elf_start");
 extern const uint8_t mknod_elf_end[] asm("_binary_logos_mknod_elf_end");
+extern const uint8_t mv_elf_start[] asm("_binary_logos_mv_elf_start");
+extern const uint8_t mv_elf_end[] asm("_binary_logos_mv_elf_end");
+extern const uint8_t pipe_demo_elf_start[] asm("_binary_logos_pipe_demo_elf_start");
+extern const uint8_t pipe_demo_elf_end[] asm("_binary_logos_pipe_demo_elf_end");
+extern const uint8_t pipe_test_elf_start[] asm("_binary_logos_pipe_test_elf_start");
+extern const uint8_t pipe_test_elf_end[] asm("_binary_logos_pipe_test_elf_end");
+extern const uint8_t ps_elf_start[] asm("_binary_logos_ps_elf_start");
+extern const uint8_t ps_elf_end[] asm("_binary_logos_ps_elf_end");
+extern const uint8_t redir_test_elf_start[] asm("_binary_logos_redir_test_elf_start");
+extern const uint8_t redir_test_elf_end[] asm("_binary_logos_redir_test_elf_end");
 extern const uint8_t rm_elf_start[] asm("_binary_logos_rm_elf_start");
 extern const uint8_t rm_elf_end[] asm("_binary_logos_rm_elf_end");
 extern const uint8_t rmdir_elf_start[] asm("_binary_logos_rmdir_elf_start");
@@ -38,10 +60,21 @@ static const struct seed_program seed_programs[] = {
     {"hello",      hello_elf_start,      hello_elf_end},
     {"sh",         shell_elf_start,      shell_elf_end},
     {"cat",        cat_elf_start,        cat_elf_end},
+    {"cp",         cp_elf_start,         cp_elf_end},
+    {"ed",         ed_elf_start,         ed_elf_end},
     {"env_demo",   env_demo_elf_start,   env_demo_elf_end},
+    {"fd_test",    fd_test_elf_start,    fd_test_elf_end},
+    {"fork_demo",  fork_demo_elf_start,  fork_demo_elf_end},
+    {"kill",       kill_elf_start,       kill_elf_end},
+    {"ln",         ln_elf_start,         ln_elf_end},
     {"ls",         ls_elf_start,         ls_elf_end},
     {"mkdir",      mkdir_elf_start,      mkdir_elf_end},
     {"mknod",      mknod_elf_start,      mknod_elf_end},
+    {"mv",         mv_elf_start,         mv_elf_end},
+    {"pipe_demo",  pipe_demo_elf_start,  pipe_demo_elf_end},
+    {"pipe_test",  pipe_test_elf_start,  pipe_test_elf_end},
+    {"ps",         ps_elf_start,         ps_elf_end},
+    {"redir_test", redir_test_elf_start, redir_test_elf_end},
     {"rm",         rm_elf_start,         rm_elf_end},
     {"rmdir",      rmdir_elf_start,      rmdir_elf_end},
     {"spawn_demo", spawn_demo_elf_start, spawn_demo_elf_end},

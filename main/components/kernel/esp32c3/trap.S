@@ -56,7 +56,7 @@ _logos_trap_start:
 .global set_trap_handler
 .type set_trap_handler, @function
 set_trap_handler:
-    ori a0, a0, 1
+    /* Direct mode sends every exception and interrupt to trap_handler. */
     csrw mtvec, a0
     csrw mscratch, a1
     ret

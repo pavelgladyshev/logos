@@ -28,9 +28,11 @@ idf_component_register(
         "components/kernel/fs_alloc.c"
         "components/kernel/fs.c"
         "components/kernel/process.c"
+        "components/kernel/pipe.c"
         "components/kernel/inode.c"
         "components/kernel/syscall.c"
         "components/kernel/kernel_time.c"
+        "components/kernel/esp32c3/timer.c"
         "components/kernel/esp32c3/logos_partition.c"
         "components/kernel/esp32c3/trap.S"
         "components/kernel/esp32c3/console_dev.c"
@@ -125,7 +127,9 @@ function(add_logos_user_program program_name)
     )
 endfunction()
 
-foreach(program_name hello cat env_demo ls mkdir mknod rm rmdir spawn_demo)
+foreach(program_name
+        hello cat cp ed env_demo fd_test fork_demo kill ln ls mkdir mknod mv
+        pipe_demo pipe_test ps redir_test rm rmdir spawn_demo)
     add_logos_user_program(${program_name})
 endforeach()
 

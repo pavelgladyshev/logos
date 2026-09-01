@@ -5,8 +5,23 @@
 
 #include "process.h"
 #include "console_constants.h"  /* for CONSOLE_MAJOR */
-#include "fs_types.h"     /* for FT_CHARDEV */
-#include <string.h>
+#include "fs_types.h"     /* for FT_CHARDEV, FT_PIPE */
+#include "pipe.h"         /* for pipe_close_fd */
+#include "string.h"
+#include "trap.h"
+#include "console.h"
+#include "timer.h"
+
+#define TIMER_MTIME    ((volatile uint32_t *)0x200bff8)
+#define TIMER_MTIMECMP ((volatile uint32_t *)0x2004000)
+#define TIME_SLICE     800
+
+/* Timer MMIO registers */
+#ifndef ESP_PLATFORM
+#define timer_read()         (*TIMER_MTIME)
+#define timer_compare(value) (*TIMER_MTIMECMP = (value))
+#endif
+
 
 
 unsigned char proc_memory[MAX_PROCS * PROC_SLOT_SIZE] __attribute__((aligned(16)));
@@ -27,6 +42,8 @@ void proc_init(void) {
         proc_table[i].exit_code = 0;
         proc_table[i].mem_base = PROC_SLOT_BASE(i);
         proc_table[i].stack_top = PROC_SLOT_STACK(i);
+        proc_table[i].sleep_reason = SLEEP_NONE;
+        proc_table[i].sleep_chan = -1;
     }
 }
 
@@ -38,6 +55,8 @@ int proc_alloc(void) {
             proc_table[i].state = PROC_READY;
             proc_table[i].parent = -1;
             proc_table[i].exit_code = 0;
+            proc_table[i].sleep_reason = SLEEP_NONE;
+            proc_table[i].sleep_chan = -1;
             return i;
         }
     }
@@ -45,13 +64,33 @@ int proc_alloc(void) {
 }
 
 void proc_free(int slot) {
+    int i;
+
+    /* Close any open pipe fds to decrement refcounts */
+    for (i = 0; i < MAX_FD; i++) {
+        if (proc_table[slot].fds[i].in_use &&
+            proc_table[slot].fds[i].type == FT_PIPE) {
+            pipe_close_fd((int)proc_table[slot].fds[i].inode,
+                          (int)proc_table[slot].fds[i].minor);
+            proc_table[slot].fds[i].in_use = 0;
+        }
+    }
     proc_table[slot].state = PROC_FREE;
     proc_table[slot].pid = 0;
+    proc_table[slot].parent = -1;
+    proc_table[slot].sleep_reason = SLEEP_NONE;
+    proc_table[slot].sleep_chan = -1;
 }
 
 void proc_fd_init(int slot) {
     struct process *p = &proc_table[slot];
     int i;
+
+    for (i = 0; i < MAX_FD; i++) {
+        if (p->fds[i].in_use && p->fds[i].type == FT_PIPE) {
+            pipe_close_fd((int)p->fds[i].inode, (int)p->fds[i].minor);
+        }
+    }
 
     /* Clear all file descriptors */
     for (i = 0; i < MAX_FD; i++) {
@@ -143,4 +182,33 @@ void proc_set_env_int(int slot, const char *name, int value) {
     }
     buf[pos] = '\0';
     proc_set_env(slot, name, buf);
+}
+
+#ifndef ESP_PLATFORM
+void timer_init(uint32_t tick_hz) {
+    (void)tick_hz;
+    /* Enable timer (bit 7) and external (bit 11) interrupt sources */
+    set_mie(0x880);
+    logos_printf("mie check");
+    /* Set first timer alarm */
+    *TIMER_MTIMECMP = *TIMER_MTIME + TIME_SLICE;
+    logos_printf("timer check");
+    /* Set MPIE so interrupts become enabled on mret */
+    set_mstatus_bit(0x80);
+    logos_printf("mstatus check");
+}
+#endif
+
+void schedule(void) {
+    int i, next;
+    for (i = 0; i < MAX_PROCS; i++) {
+        next = (current_proc + 1 + i) % MAX_PROCS;
+        if (proc_table[next].state == PROC_READY) {
+            proc_table[next].state = PROC_RUNNING;
+            current_proc = next;
+            set_trap_handler(trap_handler, &proc_table[next].tf);
+            trap_ret(&proc_table[next].tf);  /* never returns */
+        }
+    }
+    /* No runnable process found — kernel main loop handles shell restart */
 }

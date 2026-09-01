@@ -14,21 +14,31 @@
 #include "syscall.h"  /* for struct fd_entry, MAX_FD */
 #include "esp32c3/process_constants.h"
 
-/* Process states */
-#define PROC_FREE    0   /* Slot is available */
-#define PROC_RUNNING 1   /* Currently executing on CPU */
-#define PROC_READY   2   /* Suspended (parent waiting for child to exit) */
+//Process States
+#define PROC_FREE     0   /* Slot is available */
+#define PROC_READY    1   /* Runnable, waiting for CPU */
+#define PROC_RUNNING  2   /* Currently executing on CPU (exactly one) */
+#define PROC_SLEEPING 3   /* Waiting for an event (not schedulable) */
+#define PROC_ZOMBIE   4   /* Exited, waiting for parent to collect */
 
+/* Sleep reasons (why is the process sleeping?) */
+#define SLEEP_NONE    0   /* Not sleeping */
+#define SLEEP_CHILD   1   /* spawn(): waiting for specific child to exit */
+#define SLEEP_WAIT    2   /* wait(): waiting for any child to exit */
+#define SLEEP_TIMER   3   /* future: sleep(n) — waiting for timer */
+#define SLEEP_IO      4
 /* Process control block */
 struct process {
-    int              state;      /* PROC_FREE / PROC_RUNNING / PROC_READY */
-    int              pid;        /* Process ID (0 = unused) */
-    int              parent;     /* Slot index of parent (-1 = kernel) */
-    int              exit_code;  /* Exit status */
-    trap_frame_t     tf;         /* Saved CPU registers (144 bytes) */
-    uint32_t         mem_base;   /* Start of memory slot */
-    uint32_t         stack_top;  /* Top of stack within slot */
-    struct fd_entry  fds[MAX_FD]; /* Per-process file descriptors */
+    int              state;        /* PROC_FREE / READY / RUNNING / SLEEPING / ZOMBIE */
+    int              pid;          /* Process ID (0 = unused) */
+    int              parent;       /* Slot index of parent (-1 = kernel) */
+    int              exit_code;    /* Exit status */
+    int              sleep_reason; /* Why sleeping (SLEEP_CHILD, SLEEP_WAIT, etc.) */
+    int              sleep_chan;    /* Sleep context: child slot, wake time, device, etc. */
+    trap_frame_t     tf;           /* Saved CPU registers (144 bytes) */
+    uint32_t         mem_base;     /* Start of memory slot */
+    uint32_t         stack_top;    /* Top of stack within slot */
+    struct fd_entry  fds[MAX_FD];  /* Per-process file descriptors */
     char             env[MAX_ENVC][MAX_ENV_LEN];  /* Per-process environment */
     int              env_count;                     /* Number of env entries */
 };
@@ -86,5 +96,16 @@ void proc_set_env(int slot, const char *name, const char *value);
  * Set an environment variable to an integer value in a specific process slot.
  */
 void proc_set_env_int(int slot, const char *name, int value);
+
+/*
+ * Initialize timer interrupts for preemptive scheduling.
+ * Enables timer and external interrupt sources, sets first alarm.
+ */
+/*
+ * Round-robin scheduler — select next PROC_READY process and switch to it.
+ * Sets selected process to PROC_RUNNING. Never returns (calls trap_ret).
+ * Caller must set outgoing process state before calling.
+ */
+void schedule(void);
 
 #endif /* PROCESS_H */

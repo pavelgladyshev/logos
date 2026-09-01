@@ -1,4 +1,4 @@
-BUILD_ESP32C3 = build/esp32c3
+BUILD_ESP32C3 = build
 
 LOGISIM_DIR = main/components
 
@@ -20,16 +20,25 @@ logisim-clean-all:
 	$(MAKE) -C $(LOGISIM_DIR) clean-all
 
 esp:
-	idf.py -B $(BUILD_ESP32C3) build
+	./scripts/idf.sh -B $(BUILD_ESP32C3) build
+
+emulator-check:
+	./scripts/emulator-check.sh
+
+qemu: emulator-check
+	./scripts/qemu.sh
+
+qemu-gdb: emulator-check
+	./scripts/qemu.sh --gdb
 	
 esp-flash: esp
-	idf.py -p $(ESP_PORT) -B $(BUILD_ESP32C3) flash monitor
+	./scripts/idf.sh -p $(ESP_PORT) -B $(BUILD_ESP32C3) flash monitor
 
 esp-clean: 
-	idf.py -B $(BUILD_ESP32C3) clean
+	./scripts/idf.sh -B $(BUILD_ESP32C3) clean
 
 esp-clean-all:
-	idf.py -B $(BUILD_ESP32C3) fullclean
+	./scripts/idf.sh -B $(BUILD_ESP32C3) fullclean
 
 #wasn't sure if all should include flashing as well
 all: esp logisim-all

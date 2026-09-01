@@ -14,10 +14,12 @@
 #include "syscall.h"
 #include "process.h"
 #include "seed_filesystem.h"
+#include "timer.h"
 
 /* Kernel trap stack - used when handling traps from user programs */
 #define TRAP_STACK_SIZE 4096
 static uint8_t trap_stack[TRAP_STACK_SIZE] __attribute__((aligned(16)));
+
 
 /* Flag to indicate the current top-level program has exited */
 volatile int program_should_exit = 0;
@@ -45,6 +47,12 @@ void c_trap_handler(trap_frame_t *tf) {
         }
         /* Normal syscall - return to user program */
         trap_ret(tf);
+    } else if (timer_is_interrupt(cause)) {
+        /* Timer interrupt — advance alarm, preempt current, reschedule */
+        timer_acknowledge();
+        timer_schedule_next();
+        proc_table[current_proc].state = PROC_READY;
+        schedule();  /* never returns */
     } else if (cause & MCAUSE_INTERRUPT) {
         logos_printf("KERNEL: Unexpected interrupt, mcause=0x%x\n", cause);
         trap_ret(tf);
@@ -125,6 +133,7 @@ int main(void)
     }
 
     logos_printf("Filesystem mounted.\n\n");
+    timer_init(100);
     logos_printf("Starting shell\n");
     logos_printf("Type 'help' for available commands\n\n");
 
