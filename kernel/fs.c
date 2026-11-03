@@ -213,6 +213,7 @@ int fs_mknod(uint32_t dir_ino, const char *name, uint8_t major, uint8_t minor) {
     struct inode in;
     memset(&in, 0, INODE_SIZE);
     in.type = FT_CHARDEV;
+    in.link_count = 1;
     in.size = 0;
     in.major = major;
     in.minor = minor;
