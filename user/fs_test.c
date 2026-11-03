@@ -187,9 +187,9 @@ static void test_mkdir_readdir(void) {
     r = mkdir("/tmp_dir");
     if (r < 0) { fail("mkdir+readdir", "mkdir failed"); return; }
 
-    /* readdir on new empty dir */
+    /* readdir on new dir should contain . and .. */
     n = readdir("/tmp_dir", entries, 32);
-    if (n != 0) { fail("mkdir+readdir", "new dir not empty"); rmdir("/tmp_dir"); return; }
+    if (n != 2) { fail("mkdir+readdir", "expected . and .. entries"); rmdir("/tmp_dir"); return; }
 
     /* readdir on root should include tmp_dir */
     n = readdir("/", entries, 32);
