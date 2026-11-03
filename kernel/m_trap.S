@@ -33,10 +33,19 @@
     .align 4
 m_trap_handler:
     /* Save t0 and t1 — we use both in the timer handler.
-     * t0 is saved in mscratch, t1 is saved on the stack. */
+     * t0 is saved in mscratch, t1 in m_trap_save_t1.
+     *
+     * t1 must NOT be pushed on the interrupted stack: if the timer fires
+     * while a user program runs, sp holds a user *virtual* address
+     * (around 0x407Fxx), but M-mode accesses are not translated, so the
+     * push and pop would go to that *physical* address, where there is no
+     * RAM, and t1 would come back as garbage.  The kernel is linked at its
+     * physical address, so a static save slot works in M-mode.  Only one
+     * hart, and M-mode interrupts are off inside this handler, so one slot
+     * is enough. */
     csrw mscratch, t0
-    addi sp, sp, -4
-    sw   t1, 0(sp)
+    la   t0, m_trap_save_t1
+    sw   t1, 0(t0)
 
     /* Check if this is a timer interrupt (mcause = 0x80000007) */
     csrr t0, mcause
@@ -59,18 +68,18 @@ m_trap_handler:
     csrs mip, t0              /* Set SSIP — S-mode will see this as software interrupt */
 
     /* Restore t1 and t0, then return */
-    lw   t1, 0(sp)
-    addi sp, sp, 4
+    la   t0, m_trap_save_t1
+    lw   t1, 0(t0)
     csrr t0, mscratch
     mret
 
 m_trap_unexpected:
     /* Unexpected trap in M-mode — should not happen if delegation is correct */
     /* Halt (infinite loop) */
-    lw   t1, 0(sp)
-    addi sp, sp, 4
+    la   t0, m_trap_save_t1
+    lw   t1, 0(t0)
     csrr t0, mscratch         /* restore t0 before halting */
-    j    m_trap_unexpected
+1:  j    1b
 
 /* ============================
  * S-mode CSR accessors
@@ -269,3 +278,9 @@ drop_to_smode:
  * SSIP is writable from S-mode, so the S-mode handler can clear it
  * via clear_ssip() before returning.
  */
+
+/* M-mode save slot for t1 (see m_trap_handler). */
+    .data
+    .align 2
+m_trap_save_t1:
+    .word 0
