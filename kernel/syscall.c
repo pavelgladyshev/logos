@@ -45,12 +45,8 @@ static int resolve_parent(const char *path, uint32_t *parent_ino, const char **n
  * every user-supplied buffer must be translated before the kernel touches it.
  */
 static uint32_t user_to_kern(uint32_t uva, uint32_t len) {
-    uint32_t pa;
     if (len == 0) return 0;
-    pa = uva_to_pa(current_proc, uva);
-    if (!pa) return 0;
-    if (len > 1 && !uva_to_pa(current_proc, uva + len - 1)) return 0;
-    return pa;
+    return uva_range_to_pa(current_proc, uva, len);
 }
 
 /*
@@ -59,6 +55,17 @@ static uint32_t user_to_kern(uint32_t uva, uint32_t len) {
  */
 static int copyustr(char *kbuf, uint32_t uva, uint32_t maxlen) {
     return copyinstr(current_proc, kbuf, uva, maxlen);
+}
+
+/*
+ * Read element i of a user array of 32-bit words (e.g. argv, envp),
+ * checking that the element itself lies in user memory.
+ */
+static int fetch_uword(uint32_t uarray, int i, uint32_t *out) {
+    uint32_t *p = (uint32_t *)uva_range_to_pa(current_proc, uarray + 4 * (uint32_t)i, 4);
+    if (!p) return -1;
+    *out = *p;
+    return 0;
 }
 
 /*
@@ -570,13 +577,12 @@ static int32_t sys_spawn(trap_frame_t *tf) {
     /* Copy arguments from user VA to kernel buffer */
     spawn_argc = 0;
     if (tf->a1 != 0) {
-        /* Translate the argv pointer array to kernel address */
-        uint32_t *kargv = (uint32_t *)uva_to_pa(current_proc, tf->a1);
-        if (!kargv) return -1;
-        while (kargv[spawn_argc] != 0 && spawn_argc < MAX_ARGC) {
-            /* Each kargv[i] is a user VA pointing to a string */
-            if (copyustr(spawn_argv_buf[spawn_argc], kargv[spawn_argc],
-                         MAX_ARG_LEN) < 0)
+        /* Each argv[i] is a user VA pointing to a string */
+        uint32_t uarg;
+        while (spawn_argc < MAX_ARGC) {
+            if (fetch_uword(tf->a1, spawn_argc, &uarg) < 0) return -1;
+            if (uarg == 0) break;
+            if (copyustr(spawn_argv_buf[spawn_argc], uarg, MAX_ARG_LEN) < 0)
                 return -1;
             spawn_argc++;
         }
@@ -592,12 +598,13 @@ static int32_t sys_spawn(trap_frame_t *tf) {
     /* Inherit parent's environment, then override if envp provided */
     proc_env_copy(child_slot, current_proc);
     if (tf->a2 != 0) {
-        uint32_t *kenvp = (uint32_t *)uva_to_pa(current_proc, tf->a2);
-        if (!kenvp) { proc_free(child_slot); return -1; }
         int envc = 0;
+        uint32_t uenv;
         child->env_count = 0;
-        while (kenvp[envc] != 0 && envc < MAX_ENVC) {
-            if (copyustr(child->env[envc], kenvp[envc], MAX_ENV_LEN) < 0) {
+        while (envc < MAX_ENVC) {
+            if (fetch_uword(tf->a2, envc, &uenv) < 0) { proc_free(child_slot); return -1; }
+            if (uenv == 0) break;
+            if (copyustr(child->env[envc], uenv, MAX_ENV_LEN) < 0) {
                 proc_free(child_slot);
                 return -1;
             }
@@ -781,11 +788,11 @@ static int32_t sys_exec(trap_frame_t *tf) {
     /* Copy arguments from user VA to kernel buffer BEFORE overwriting */
     spawn_argc = 0;
     if (tf->a1 != 0) {
-        uint32_t *kargv = (uint32_t *)uva_to_pa(current_proc, tf->a1);
-        if (!kargv) return -1;
-        while (kargv[spawn_argc] != 0 && spawn_argc < MAX_ARGC) {
-            if (copyustr(spawn_argv_buf[spawn_argc], kargv[spawn_argc],
-                         MAX_ARG_LEN) < 0)
+        uint32_t uarg;
+        while (spawn_argc < MAX_ARGC) {
+            if (fetch_uword(tf->a1, spawn_argc, &uarg) < 0) return -1;
+            if (uarg == 0) break;
+            if (copyustr(spawn_argv_buf[spawn_argc], uarg, MAX_ARG_LEN) < 0)
                 return -1;
             spawn_argc++;
         }
@@ -793,12 +800,13 @@ static int32_t sys_exec(trap_frame_t *tf) {
 
     /* Copy envp from user VA to process env if provided */
     if (tf->a2 != 0) {
-        uint32_t *kenvp = (uint32_t *)uva_to_pa(current_proc, tf->a2);
-        if (!kenvp) return -1;
         int envc = 0;
+        uint32_t uenv;
         cur->env_count = 0;
-        while (kenvp[envc] != 0 && envc < MAX_ENVC) {
-            if (copyustr(cur->env[envc], kenvp[envc], MAX_ENV_LEN) < 0)
+        while (envc < MAX_ENVC) {
+            if (fetch_uword(tf->a2, envc, &uenv) < 0) return -1;
+            if (uenv == 0) break;
+            if (copyustr(cur->env[envc], uenv, MAX_ENV_LEN) < 0)
                 return -1;
             envc++;
         }

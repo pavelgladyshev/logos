@@ -153,6 +153,9 @@ int setup_process_vm(int slot);
  */
 uint32_t uva_to_pa(int slot, uint32_t uva);
 
+/* Translate a whole user buffer; 0 unless [uva, uva+len) lies in one user region. */
+uint32_t uva_range_to_pa(int slot, uint32_t uva, uint32_t len);
+
 /*
  * Copy data from user VA to kernel buffer.
  * Returns number of bytes copied, or -1 on error.

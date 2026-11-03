@@ -239,23 +239,49 @@ uint32_t uva_to_pa(int slot, uint32_t uva)
     return 0;  /* Invalid address */
 }
 
+/*
+ * End (exclusive) of the user region that contains uva, or 0 if uva is not
+ * in a user region.  Each region (the process's code/data slot, the shared
+ * memory window) is physically contiguous, but the regions are not
+ * contiguous with each other.
+ */
+static uint32_t uva_region_end(uint32_t uva)
+{
+    if (uva >= USER_VA_BASE && uva < USER_VA_END)
+        return USER_VA_END;
+    if (uva >= SHM_VA_BASE && uva < SHM_VA_BASE + MAX_SHM * SHM_SEG_SIZE)
+        return SHM_VA_BASE + MAX_SHM * SHM_SEG_SIZE;
+    return 0;
+}
+
+/*
+ * Translate a user buffer [uva, uva+len) to a physical address, but only if
+ * the WHOLE buffer lies inside one user region, so that it is physically
+ * contiguous.  Checking just the first and last byte is not enough: a buffer
+ * that starts in the user slot and ends in the shared-memory window has two
+ * valid ends, yet its middle is not mapped and its physical image is not one
+ * range.  Returns 0 if the buffer is invalid.
+ */
+uint32_t uva_range_to_pa(int slot, uint32_t uva, uint32_t len)
+{
+    uint32_t end = uva_region_end(uva);
+    if (!end) return 0;
+    if (len > end - uva) return 0;      /* runs past the region (no overflow) */
+    return uva_to_pa(slot, uva);
+}
+
 int copyin(int slot, void *kbuf, uint32_t uva, uint32_t len)
 {
-    uint32_t pa = uva_to_pa(slot, uva);
+    uint32_t pa = uva_range_to_pa(slot, uva, len);
     if (!pa) return -1;
-    /* Check that entire range is valid */
-    uint32_t pa_end = uva_to_pa(slot, uva + len - 1);
-    if (!pa_end) return -1;
     memcpy(kbuf, (void *)pa, len);
     return (int)len;
 }
 
 int copyout(int slot, uint32_t uva, const void *kbuf, uint32_t len)
 {
-    uint32_t pa = uva_to_pa(slot, uva);
+    uint32_t pa = uva_range_to_pa(slot, uva, len);
     if (!pa) return -1;
-    uint32_t pa_end = uva_to_pa(slot, uva + len - 1);
-    if (!pa_end) return -1;
     memcpy((void *)pa, kbuf, len);
     return (int)len;
 }
@@ -264,6 +290,10 @@ int copyinstr(int slot, char *kbuf, uint32_t uva, uint32_t maxlen)
 {
     uint32_t pa = uva_to_pa(slot, uva);
     if (!pa) return -1;
+    if (maxlen == 0) return -1;
+    /* never read past the end of the region the string starts in */
+    uint32_t avail = uva_region_end(uva) - uva;
+    if (maxlen - 1 > avail) maxlen = avail + 1;
     const char *src = (const char *)pa;
     uint32_t i;
     for (i = 0; i < maxlen - 1; i++) {
