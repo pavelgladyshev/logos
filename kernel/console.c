@@ -75,9 +75,12 @@ void printf(const char *fmt, ...) {
         if (*fmt == '%') {
             fmt++;
             switch (*fmt) {
-                case 's':
-                    puts(va_arg(ap, const char*));
+                case 's': {
+                    /* not puts(): that would add a newline after the string */
+                    const char *s = va_arg(ap, const char*);
+                    while (*s) putchar(*s++);
                     break;
+                }
                 case 'd':
                     put_int(va_arg(ap, int));
                     break;
