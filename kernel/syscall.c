@@ -169,6 +169,20 @@ static int sys_exit(trap_frame_t *tf) {
 }
 
 /*
+ * kill_current_process - end the current process with `status`, exactly as
+ * if it had called exit(status): its children are orphaned, its pipe ends
+ * closed, and its parent - if asleep in wait() or spawn() - gets the status
+ * (and $?).  Used when a user program causes an exception.  Like sys_exit,
+ * it does not return for a process with a parent; for a process without one
+ * (the top-level shell) it returns 1, and the caller lets the kernel start a
+ * new shell.
+ */
+int kill_current_process(trap_frame_t *tf, int status) {
+    tf->a0 = (uint32_t)status;
+    return sys_exit(tf);
+}
+
+/*
  * sys_read - Read from a file descriptor
  * a0 = fd, a1 = buf, a2 = len
  * Returns: number of bytes read, or negative error
@@ -722,6 +736,9 @@ static int32_t sys_fork(trap_frame_t *tf) {
     /* Child's fork() returns 0 */
     child->tf.a0 = 0;
 
+    /* The child has the parent's name, as on Unix (ps, kernel messages) */
+    memcpy(child->name, parent->name, sizeof(child->name));
+
     /* Copy environment and file descriptors */
     proc_env_copy(child_slot, current_proc);
     memcpy(child->fds, parent->fds, sizeof(parent->fds));
@@ -891,6 +908,7 @@ static int32_t sys_wait(trap_frame_t *tf) {
         if (proc_table[i].state == PROC_ZOMBIE) {
             int exit_code = proc_table[i].exit_code;
             proc_free(i);
+            proc_set_env_int(current_proc, "?", exit_code);  /* as sys_exit does */
             return exit_code;
         }
         if (proc_table[i].state != PROC_FREE) {

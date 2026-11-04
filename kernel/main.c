@@ -89,29 +89,36 @@ void c_trap_handler(trap_frame_t *tf) {
     } else if (cause & SCAUSE_INTERRUPT) {
         printf("KERNEL: Unexpected S-mode interrupt, scause=0x%x\n", cause);
         trap_ret(tf);
-    } else if (cause == SCAUSE_INST_PAGE_FAULT ||
-               cause == SCAUSE_LOAD_PAGE_FAULT ||
-               cause == SCAUSE_STORE_PAGE_FAULT) {
-        uint32_t faulting_va = read_stval();
-        printf("KERNEL: Page fault! scause=%d va=0x%x pid=%d (%s) sepc=0x%x\n",
-               cause, faulting_va, proc_table[current_proc].pid,
-               proc_table[current_proc].name, tf->mepc);
-        /* Kill the faulting process */
-        proc_table[current_proc].exit_code = -1;
-        proc_table[current_proc].state = PROC_ZOMBIE;
-        /* Wake parent if waiting */
-        if (proc_table[current_proc].parent >= 0) {
-            int parent = proc_table[current_proc].parent;
-            if (proc_table[parent].state == PROC_SLEEPING) {
-                proc_table[parent].state = PROC_READY;
-            }
-        }
-        schedule();  /* Switch to another process */
     } else {
-        printf("KERNEL: Exception! scause=%d, sepc=0x%x\n", cause, tf->mepc);
-        printf("KERNEL: stval=0x%x\n", read_stval());
-        printf("KERNEL: Halting.\n");
-        while (1) {}
+        /* An exception.  sstatus.SPP (bit 8) says where it came from: 1 means
+         * the kernel itself (S-mode), which is a kernel bug - stop.  Otherwise a
+         * user program caused it - a page fault, illegal instruction,
+         * misaligned access, ebreak, ...: report it and end that process as if
+         * it had called exit(-1), so that the rest of the system carries on. */
+        uint32_t sstatus;
+        __asm__ volatile ("csrr %0, 0x100" : "=r"(sstatus));   /* sstatus */
+        if (sstatus & (1u << 8)) {
+            printf("KERNEL: Exception in the kernel! scause=%d, sepc=0x%x\n", cause, tf->mepc);
+            printf("KERNEL: stval=0x%x\n", read_stval());
+            printf("KERNEL: Halting.\n");
+            while (1) {}
+        }
+        if (cause == SCAUSE_INST_PAGE_FAULT ||
+            cause == SCAUSE_LOAD_PAGE_FAULT ||
+            cause == SCAUSE_STORE_PAGE_FAULT) {
+            printf("KERNEL: Page fault! scause=%d va=0x%x pid=%d (%s) sepc=0x%x\n",
+                   cause, read_stval(), proc_table[current_proc].pid,
+                   proc_table[current_proc].name, tf->mepc);
+        } else {
+            printf("KERNEL: Exception! scause=%d stval=0x%x pid=%d (%s) sepc=0x%x\n",
+                   cause, read_stval(), proc_table[current_proc].pid,
+                   proc_table[current_proc].name, tf->mepc);
+        }
+        if (kill_current_process(tf, -1)) {
+            program_should_exit = 1;   /* it was the top-level shell */
+            return;
+        }
+        /* not reached: sys_exit switched to another process */
     }
 }
 
@@ -242,7 +249,8 @@ int main(void)
     sfence_vma();
 
     /* 8. Drop to S-mode with interrupts DISABLED.
-     * Set MPP=Supervisor, MPIE=0 so that mret clears SIE.
+     * Set MPP=Supervisor and MPIE=0: mret copies MPIE into MIE, so M-mode
+     * interrupts stay off; it does not touch SIE, which is still 0.
      * s_mode_main will enable interrupts after setting up the trap handler. */
     /* Drop to S-mode */
     {
@@ -251,7 +259,7 @@ int main(void)
         __asm__ volatile ("csrr %0, mstatus" : "=r"(mstatus));
         mstatus &= ~(3 << 11);   /* Clear MPP */
         mstatus |= (1 << 11);    /* Set MPP = Supervisor (01) */
-        mstatus &= ~(1 << 7);    /* Clear MPIE → SIE=0 after mret */
+        mstatus &= ~(1 << 7);    /* Clear MPIE → MIE=0 after mret */
         __asm__ volatile ("csrw mstatus, %0" :: "r"(mstatus));
     }
 
