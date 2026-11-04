@@ -56,6 +56,7 @@ struct process {
     int              env_count;                     /* Number of env entries */
     uint8_t          shm_attached;  /* Bitmap: which SHM segments this process has attached */
     uint8_t          sem_attached;  /* Bitmap: which semaphores this process holds */
+    uint32_t         pipe_written;  /* Bytes of an unfinished pipe write already delivered */
 };
 
 /* Global process table and current process index */

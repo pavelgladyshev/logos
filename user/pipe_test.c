@@ -3,7 +3,7 @@
  * Licensed under Creative Commons Attribution International License 4.0
  *
  * Tests pipe buffer boundaries, partial I/O, EPIPE, multiple pipes,
- * dup refcounting, and zero-length operations.
+ * dup refcounting, zero-length operations, and writes larger than the buffer.
  *
  * PIPE_BUF_SIZE = 256 (kernel), MAX_PIPES = 8, MAX_FD = 16
  */
@@ -420,6 +420,92 @@ static void test_dup2_redirect(void)
     close(pfd[0]);
 }
 
+/*
+ * Test 11: A write bigger than the pipe buffer is delivered in full.
+ * The parent writes 1000 bytes in one call (the buffer holds 256) while a
+ * child reads them in small pieces; write() must return 1000 and the child
+ * must receive every byte in order.
+ */
+static void test_large_write(void)
+{
+    int pfd[2];
+    static char wbuf[1000];
+    int i, n, pid, status;
+
+    printf("\n--- Test 11: write larger than the buffer ---\n");
+    if (pipe(pfd) < 0) { fail("large write", "pipe() failed"); return; }
+    for (i = 0; i < 1000; i++) wbuf[i] = (char)('A' + i % 26);
+
+    pid = fork();
+    if (pid < 0) { fail("large write", "fork() failed"); return; }
+    if (pid == 0) {
+        char rbuf[40];
+        int total = 0, bad = 0, r, j;
+        close(pfd[1]);
+        while ((r = read(pfd[0], rbuf, sizeof(rbuf))) > 0) {
+            for (j = 0; j < r; j++)
+                if (rbuf[j] != (char)('A' + (total + j) % 26)) bad = 1;
+            total += r;
+        }
+        close(pfd[0]);
+        exit((total == 1000 && !bad) ? 0 : 1);
+    }
+
+    close(pfd[0]);
+    n = write(pfd[1], wbuf, 1000);
+    close(pfd[1]);
+    status = wait();
+    if (n != 1000) {
+        printf("  write returned %d (expected 1000)\n", n);
+        fail("large write", "short write");
+    } else if (status != 0) {
+        fail("large write", "reader did not receive all 1000 bytes in order");
+    } else {
+        pass("large write");
+    }
+}
+
+/*
+ * Test 12: The reader goes away in the middle of a large write.
+ * The child reads 100 bytes and exits; the parent's 1000-byte write must
+ * return the number of bytes delivered so far (not hang, not -1), and the
+ * next write must fail with EPIPE (-1).
+ */
+static void test_large_write_epipe(void)
+{
+    int pfd[2];
+    static char wbuf[1000];
+    int n, n2, pid;
+
+    printf("\n--- Test 12: reader exits during a large write ---\n");
+    if (pipe(pfd) < 0) { fail("large write epipe", "pipe() failed"); return; }
+    memset(wbuf, 'x', sizeof(wbuf));
+
+    pid = fork();
+    if (pid < 0) { fail("large write epipe", "fork() failed"); return; }
+    if (pid == 0) {
+        char rbuf[100];
+        int got = 0, r;
+        close(pfd[1]);
+        while (got < 100 && (r = read(pfd[0], rbuf, 100 - got)) > 0) got += r;
+        close(pfd[0]);
+        exit(0);
+    }
+
+    close(pfd[0]);
+    n = write(pfd[1], wbuf, 1000);
+    n2 = write(pfd[1], wbuf, 10);
+    close(pfd[1]);
+    wait();
+    if (n >= 100 && n < 1000 && n2 == -1) {
+        printf("  delivered %d bytes before the reader left\n", n);
+        pass("large write epipe");
+    } else {
+        printf("  write returned %d, then %d\n", n, n2);
+        fail("large write epipe", "expected a partial count, then -1");
+    }
+}
+
 int main(void)
 {
     printf("pipe_test: comprehensive pipe tests\n");
@@ -434,6 +520,8 @@ int main(void)
     test_coalesce_reads();
     test_read_more_than_available();
     test_dup2_redirect();
+    test_large_write();
+    test_large_write_epipe();
 
     print_test_results();
 
