@@ -311,7 +311,7 @@ static void cmd_help(void)
     puts("  cd [dir]         - Change current directory");
     puts("");
     puts("Redirection: cmd > file, cmd >> file, cmd < file");
-    puts("Pipes:       cmd1 | cmd2 [| cmd3 ...]  (up to 4 stages)");
+    puts("Pipes:       cmd1 | cmd2 [| cmd3 ...]  (up to 4 stages; built-ins too)");
     puts("Background:  cmd &  (run without waiting)");
     puts("Scripting:   sh scriptfile");
     puts("Flow:        if/then/else/fi, while/do/done, for/in/do/done");
@@ -372,6 +372,46 @@ static void cmd_cd(int argc, char *argv[])
     if (chdir(path) < 0) {
         printf("cd: %s: not found\n", path);
     }
+}
+
+/*
+ * run_builtin_in_child - called by a pipeline stage after fork(), once its
+ * stdin and stdout have been connected to the pipes.  If argv[0] names a
+ * built-in, run it here in the child and exit, so that "echo hi | cat"
+ * works; otherwise return, and the caller execs the program.
+ *
+ * As in other Unix shells, a built-in that changes the shell's own state
+ * (cd, set, unset, exit) changes only the child's copy: "cd /etc | cat"
+ * leaves the shell's current directory where it was.
+ */
+static void run_builtin_in_child(char *argv[])
+{
+    int argc = 0;
+
+    if (argv[0] == (char *)0) return;
+    while (argv[argc] != (char *)0) argc++;
+
+    if (strcmp(argv[0], "echo") == 0) {
+        cmd_echo(argc, argv);
+    } else if (strcmp(argv[0], "help") == 0) {
+        cmd_help();
+    } else if (strcmp(argv[0], "set") == 0) {
+        cmd_set(argc, argv);
+    } else if (strcmp(argv[0], "unset") == 0) {
+        cmd_unset(argc, argv);
+    } else if (strcmp(argv[0], "cd") == 0) {
+        cmd_cd(argc, argv);
+    } else if (strcmp(argv[0], "exit") == 0) {
+        int code = 0;
+        if (argc > 1) {
+            int parsed = atoi(argv[1]);
+            if (parsed >= 0) code = parsed;
+        }
+        exit(code);
+    } else {
+        return;                     /* not a built-in: exec it */
+    }
+    exit(0);
 }
 
 /* ================================================================
@@ -493,6 +533,7 @@ static void run_multi_pipeline(int n_stages, char **argv_s[],
                 exit(1);
             }
 
+            run_builtin_in_child(argv_s[i]);   /* exits if it was a built-in */
             exec_with_path(argv_s[i]);
             exit(127);
         }
