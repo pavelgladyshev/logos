@@ -125,7 +125,7 @@ static void test_comments(void) {
 
 /* Test 3: if/then/fi (true condition) */
 static void test_if_true(void) {
-    char output[256];
+    char output[1024];   /* "ls /bin" alone prints ~470 bytes */
     int n;
 
     printf("\n--- Test 3: if/then/fi (true) ---\n");
