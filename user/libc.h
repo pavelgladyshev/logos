@@ -26,6 +26,9 @@ typedef int ssize_t;
 #define O_TRUNC   0x200
 #define O_APPEND  0x400
 
+/* Pipe capacity and atomic-write limit; must match PIPE_BUF_SIZE in kernel/pipe.h */
+#define PIPE_BUF  512
+
 /*
  * System call wrappers
  */

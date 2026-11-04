@@ -13,7 +13,7 @@
 #include "types.h"
 
 #define MAX_PIPES       8
-#define PIPE_BUF_SIZE   256
+#define PIPE_BUF_SIZE   512     /* also the atomic-write limit (POSIX PIPE_BUF >= 512) */
 
 /* Pipe states */
 #define PIPE_FREE       0

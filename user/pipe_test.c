@@ -3,9 +3,10 @@
  * Licensed under Creative Commons Attribution International License 4.0
  *
  * Tests pipe buffer boundaries, partial I/O, EPIPE, multiple pipes,
- * dup refcounting, zero-length operations, and writes larger than the buffer.
+ * dup refcounting, zero-length operations, writes larger than the buffer,
+ * and atomic writes of at most PIPE_BUF bytes.
  *
- * PIPE_BUF_SIZE = 256 (kernel), MAX_PIPES = 8, MAX_FD = 16
+ * PIPE_BUF = 512 (kernel PIPE_BUF_SIZE), MAX_PIPES = 8, MAX_FD = 16
  */
 
 #include "libc.h"
@@ -51,27 +52,27 @@ static void test_partial_reads(void)
 
 /*
  * Test 2: Buffer capacity
- * Fill the pipe to its 256-byte capacity, read it all back.
+ * Fill the pipe to its PIPE_BUF-byte capacity, read it all back.
  */
 static void test_buffer_capacity(void)
 {
     int pfd[2];
-    char wbuf[256];
-    char rbuf[256];
+    char wbuf[PIPE_BUF];
+    char rbuf[PIPE_BUF];
     int i, n;
 
-    printf("\n--- Test 2: buffer capacity (256 bytes) ---\n");
+    printf("\n--- Test 2: buffer capacity (%d bytes) ---\n", PIPE_BUF);
     if (pipe(pfd) < 0) { fail("buffer capacity", "pipe() failed"); return; }
 
     /* Fill write buffer with pattern */
-    for (i = 0; i < 256; i++) {
+    for (i = 0; i < PIPE_BUF; i++) {
         wbuf[i] = (char)(i & 0x7F);
     }
 
-    /* Write 256 bytes (full buffer) */
-    n = write(pfd[1], wbuf, 256);
-    if (n != 256) {
-        printf("  wrote %d bytes (expected 256)\n", n);
+    /* Write PIPE_BUF bytes (full buffer) */
+    n = write(pfd[1], wbuf, PIPE_BUF);
+    if (n != PIPE_BUF) {
+        printf("  wrote %d bytes (expected %d)\n", n, PIPE_BUF);
         fail("buffer capacity", "write did not fill buffer");
         close(pfd[0]); close(pfd[1]);
         return;
@@ -79,16 +80,16 @@ static void test_buffer_capacity(void)
 
     /* Read all back */
     memset(rbuf, 0, sizeof(rbuf));
-    n = read(pfd[0], rbuf, 256);
-    if (n != 256) {
-        printf("  read %d bytes (expected 256)\n", n);
+    n = read(pfd[0], rbuf, PIPE_BUF);
+    if (n != PIPE_BUF) {
+        printf("  read %d bytes (expected %d)\n", n, PIPE_BUF);
         fail("buffer capacity", "read did not get all bytes");
         close(pfd[0]); close(pfd[1]);
         return;
     }
 
     /* Verify data integrity */
-    if (memcmp(wbuf, rbuf, 256) != 0) {
+    if (memcmp(wbuf, rbuf, PIPE_BUF) != 0) {
         fail("buffer capacity", "data mismatch");
         close(pfd[0]); close(pfd[1]);
         return;
@@ -422,7 +423,7 @@ static void test_dup2_redirect(void)
 
 /*
  * Test 11: A write bigger than the pipe buffer is delivered in full.
- * The parent writes 1000 bytes in one call (the buffer holds 256) while a
+ * The parent writes 1000 bytes in one call (the buffer holds PIPE_BUF) while a
  * child reads them in small pieces; write() must return 1000 and the child
  * must receive every byte in order.
  */
@@ -506,6 +507,59 @@ static void test_large_write_epipe(void)
     }
 }
 
+/*
+ * Test 13: Writes of at most PIPE_BUF bytes are atomic.
+ * Two children each write three 300-byte messages ('A's and 'B's) into the
+ * same pipe while the parent reads it in small pieces.  Every message must
+ * arrive in one piece: the stream is six 300-byte runs of a single letter.
+ */
+static void test_atomic_writes(void)
+{
+    int pfd[2];
+    static char stream[1800];
+    char rbuf[50];
+    int total = 0, r, c, k, i, ok;
+    char letters[2] = { 'A', 'B' };
+
+    printf("\n--- Test 13: atomic writes of <= PIPE_BUF bytes ---\n");
+    if (pipe(pfd) < 0) { fail("atomic writes", "pipe() failed"); return; }
+
+    for (c = 0; c < 2; c++) {
+        int pid = fork();
+        if (pid < 0) { fail("atomic writes", "fork() failed"); return; }
+        if (pid == 0) {
+            static char msg[300];
+            close(pfd[0]);
+            memset(msg, letters[c], sizeof(msg));
+            for (k = 0; k < 3; k++)
+                if (write(pfd[1], msg, sizeof(msg)) != (int)sizeof(msg)) exit(1);
+            close(pfd[1]);
+            exit(0);
+        }
+    }
+
+    close(pfd[1]);
+    while (total < (int)sizeof(stream) &&
+           (r = read(pfd[0], rbuf, sizeof(rbuf))) > 0) {
+        for (i = 0; i < r && total < (int)sizeof(stream); i++)
+            stream[total++] = rbuf[i];
+    }
+    close(pfd[0]);
+    wait();
+    wait();
+
+    ok = (total == 1800);
+    for (k = 0; ok && k < 6; k++)
+        for (i = 1; i < 300; i++)
+            if (stream[k * 300 + i] != stream[k * 300]) { ok = 0; break; }
+    if (ok) {
+        pass("atomic writes");
+    } else {
+        printf("  got %d bytes; a message was split or mixed\n", total);
+        fail("atomic writes", "300-byte messages interleaved");
+    }
+}
+
 int main(void)
 {
     printf("pipe_test: comprehensive pipe tests\n");
@@ -522,6 +576,7 @@ int main(void)
     test_dup2_redirect();
     test_large_write();
     test_large_write_epipe();
+    test_atomic_writes();
 
     print_test_results();
 
