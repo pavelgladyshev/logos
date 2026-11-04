@@ -213,7 +213,8 @@ int semget(int key, int value, int flags);
 /* Wait (decrement) a semaphore. Blocks if count is 0. */
 int semwait(int sem_id);
 
-/* Post (increment) a semaphore. Wakes one blocked waiter. */
+/* Post (increment) a semaphore. Wakes the processes blocked on it; each retries its
+ * semwait, so one takes the unit and the others go back to sleep. */
 int sempost(int sem_id);
 
 /* Close a semaphore handle. Frees when all handles closed. */
