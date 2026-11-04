@@ -250,16 +250,37 @@ static int32_t sys_write(trap_frame_t *tf) {
         }
         return result;
     } else if (fde->type == FT_PIPE) {
-        /* Write to pipe */
+        /* Write to pipe.  As in Unix, a write to a pipe returns only when
+         * all len bytes have been delivered (or the readers are gone), but
+         * the buffer holds just PIPE_BUF_SIZE bytes.  So pipe_write puts in
+         * what fits; if bytes remain, we remember how many were delivered,
+         * move the saved buffer pointer (a1) and length (a2) past them, and
+         * sleep until a reader makes room.  The woken process re-executes
+         * the ecall, which carries on with the rest.  Changing a1/a2 is
+         * safe: they are argument registers, which a caller does not expect
+         * to survive a call. */
+        struct process *cur = &proc_table[current_proc];
         int pipe_idx = (int)fde->inode;
         result = pipe_write(pipe_idx, kbuf, len);
+        if (result > 0 && (uint32_t)result < len) {
+            cur->pipe_written += (uint32_t)result;
+            tf->a1 += (uint32_t)result;
+            tf->a2 -= (uint32_t)result;
+            result = -2;                /* not finished: wait for room */
+        }
         if (result == -2) {
             /* Would block: sleep and retry (ecall will re-execute) */
-            proc_table[current_proc].state = PROC_SLEEPING;
-            proc_table[current_proc].sleep_reason = SLEEP_IO;
-            proc_table[current_proc].sleep_chan = pipe_idx;
+            cur->state = PROC_SLEEPING;
+            cur->sleep_reason = SLEEP_IO;
+            cur->sleep_chan = pipe_idx;
             schedule();  /* never returns; woken process re-executes ecall */
         }
+        if (result >= 0) {
+            result += (int)cur->pipe_written;     /* the whole write */
+        } else if (cur->pipe_written > 0) {
+            result = (int)cur->pipe_written;      /* readers gone midway */
+        }
+        cur->pipe_written = 0;
         return result;
     }
 

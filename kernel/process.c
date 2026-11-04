@@ -48,6 +48,7 @@ int proc_alloc(void) {
             proc_table[i].name[0] = '\0';
             proc_table[i].shm_attached = 0;
             proc_table[i].sem_attached = 0;
+            proc_table[i].pipe_written = 0;
             return i;
         }
     }
