@@ -605,14 +605,16 @@ static int collect_block(char buf[][MAX_CMD_LEN], int *count, int max,
             depth--;
         }
 
-        /* Store line in block */
-        if (*count >= max) {
-            printf("sh: block too large (max %d lines)\n", max);
-            return -1;
+        /* Store line in block (buf == NULL: skip the block, store nothing) */
+        if (buf) {
+            if (*count >= max) {
+                printf("sh: block too large (max %d lines)\n", max);
+                return -1;
+            }
+            strncpy(buf[*count], line, MAX_CMD_LEN - 1);
+            buf[*count][MAX_CMD_LEN - 1] = '\0';
+            (*count)++;
         }
-        strncpy(buf[*count], line, MAX_CMD_LEN - 1);
-        buf[*count][MAX_CMD_LEN - 1] = '\0';
-        (*count)++;
     }
 }
 
@@ -647,16 +649,166 @@ static int collect_block_from_array(char src[][MAX_CMD_LEN], int src_count, int 
             depth--;
         }
 
-        if (*count >= max) {
-            printf("sh: block too large (max %d lines)\n", max);
-            return -1;
+        if (buf) {                  /* buf == NULL: skip, store nothing */
+            if (*count >= max) {
+                printf("sh: block too large (max %d lines)\n", max);
+                return -1;
+            }
+            strncpy(buf[*count], src[*idx], MAX_CMD_LEN - 1);
+            buf[*count][MAX_CMD_LEN - 1] = '\0';
+            (*count)++;
         }
-        strncpy(buf[*count], src[*idx], MAX_CMD_LEN - 1);
-        buf[*count][MAX_CMD_LEN - 1] = '\0';
-        (*count)++;
         (*idx)++;
     }
     return 0;
+}
+
+/*
+ * The constructs inside a block each get their own function, and noinline
+ * keeps the compiler from merging them back into execute_block.  Each one
+ * declares 2-4 KB of line buffers; in a single function they all occupied
+ * every frame (4.4 KB), so a nested block such as an if inside a while
+ * needed ~19 KB of stack and overran the shell's ~16 KB, overwriting its
+ * code.  Now a frame holds only the buffers of the construct it runs, and
+ * an if keeps only the branch that will run.
+ * Each helper is called with lines[i] at its keyword and returns the index
+ * of the first line after the construct.
+ */
+static void execute_block(char lines[][MAX_CMD_LEN], int count);
+
+static int __attribute__((noinline))
+block_if(char lines[][MAX_CMD_LEN], int count, int i, const char *trimmed)
+{
+    /* Execute the condition (rest of line after "if ") */
+    const char *cond = trimmed + 2;
+    while (*cond == ' ' || *cond == '\t') cond++;
+    if (*cond) execute_line(cond);
+    char *exitcode = getenv("?");
+    int cond_ok = (exitcode && exitcode[0] == '0' && exitcode[1] == '\0');
+
+    i++;  /* past 'if' line */
+
+    /* Expect 'then' */
+    if (i < count && starts_with_keyword(skip_ws(lines[i]), "then")) {
+        i++;  /* past 'then' */
+    } else {
+        printf("sh: expected 'then'\n");
+        return i;
+    }
+
+    /* Only one branch runs, so keep only that one: collect the then-block
+     * if the condition held, otherwise skip it (NULL buffer); same for the
+     * else-block.  One 2 KB buffer instead of two. */
+    char block[MAX_BLOCK_LINES][MAX_CMD_LEN];
+    int then_count = 0, else_count = 0;
+    int r = collect_block_from_array(lines, count, &i,
+                                     cond_ok ? block : (char (*)[MAX_CMD_LEN])0,
+                                     &then_count, MAX_BLOCK_LINES, "fi", "else");
+    if (r == 2) {
+        /* Hit 'else' — collect or skip the else-block */
+        collect_block_from_array(lines, count, &i,
+                                 cond_ok ? (char (*)[MAX_CMD_LEN])0 : block,
+                                 &else_count, MAX_BLOCK_LINES, "fi", (char *)0);
+    }
+    if (cond_ok)
+        execute_block(block, then_count);
+    else if (r == 2)
+        execute_block(block, else_count);
+    return i;
+}
+
+static int __attribute__((noinline))
+block_while(char lines[][MAX_CMD_LEN], int count, int i, const char *trimmed)
+{
+    const char *cond = trimmed + 5;
+    while (*cond == ' ' || *cond == '\t') cond++;
+    char cond_str[MAX_CMD_LEN];
+    strncpy(cond_str, cond, MAX_CMD_LEN - 1);
+    cond_str[MAX_CMD_LEN - 1] = '\0';
+
+    i++;  /* past 'while' line */
+
+    /* Expect 'do' */
+    if (i < count && starts_with_keyword(skip_ws(lines[i]), "do")) {
+        i++;  /* past 'do' */
+    } else {
+        printf("sh: expected 'do'\n");
+        return i;
+    }
+
+    /* Collect body */
+    char body[MAX_BLOCK_LINES][MAX_CMD_LEN];
+    int body_count = 0;
+    int save_i = i;
+    collect_block_from_array(lines, count, &i,
+                             body, &body_count, MAX_BLOCK_LINES,
+                             "done", (char *)0);
+
+    /* Loop */
+    while (1) {
+        execute_line(cond_str);
+        char *exitcode = getenv("?");
+        if (!(exitcode && exitcode[0] == '0' && exitcode[1] == '\0'))
+            break;
+        execute_block(body, body_count);
+    }
+    return i;
+}
+
+static int __attribute__((noinline))
+block_for(char lines[][MAX_CMD_LEN], int count, int i, const char *trimmed)
+{
+    /* Parse: for VAR in arg1 arg2 ... */
+    char for_line[MAX_CMD_LEN];
+    strncpy(for_line, trimmed, MAX_CMD_LEN - 1);
+    for_line[MAX_CMD_LEN - 1] = '\0';
+
+    char *for_argv[MAX_ARGS];
+    int for_argc = parse_cmd(for_line + 3, for_argv, MAX_ARGS);  /* skip "for" */
+
+    if (for_argc < 3 || strcmp(for_argv[1], "in") != 0) {
+        printf("sh: usage: for VAR in args...\n");
+        i++;
+        return i;
+    }
+
+    char varname[32];
+    strncpy(varname, for_argv[0], sizeof(varname) - 1);
+    varname[sizeof(varname) - 1] = '\0';
+
+    /* Collect the word list before parse_cmd destroys for_line */
+    char words[MAX_ARGS][MAX_CMD_LEN];
+    int nwords = 0;
+    int w;
+    for (w = 2; w < for_argc && nwords < MAX_ARGS; w++) {
+        strncpy(words[nwords], for_argv[w], MAX_CMD_LEN - 1);
+        words[nwords][MAX_CMD_LEN - 1] = '\0';
+        nwords++;
+    }
+
+    i++;  /* past 'for' line */
+
+    /* Expect 'do' */
+    if (i < count && starts_with_keyword(skip_ws(lines[i]), "do")) {
+        i++;  /* past 'do' */
+    } else {
+        printf("sh: expected 'do'\n");
+        return i;
+    }
+
+    /* Collect body */
+    char body[MAX_BLOCK_LINES][MAX_CMD_LEN];
+    int body_count = 0;
+    collect_block_from_array(lines, count, &i,
+                             body, &body_count, MAX_BLOCK_LINES,
+                             "done", (char *)0);
+
+    /* Iterate */
+    for (w = 0; w < nwords; w++) {
+        setenv(varname, words[w]);
+        execute_block(body, body_count);
+    }
+    return i;
 }
 
 /*
@@ -672,145 +824,17 @@ static void execute_block(char lines[][MAX_CMD_LEN], int count)
         /* Skip empty / comment lines */
         if (*trimmed == '\0' || *trimmed == '#') { i++; continue; }
 
-        /* --- if/then/else/fi --- */
         if (starts_with_keyword(trimmed, "if")) {
-            /* Execute the condition (rest of line after "if ") */
-            const char *cond = trimmed + 2;
-            while (*cond == ' ' || *cond == '\t') cond++;
-            if (*cond) execute_line(cond);
-            char *exitcode = getenv("?");
-            int cond_ok = (exitcode && exitcode[0] == '0' && exitcode[1] == '\0');
-
-            i++;  /* past 'if' line */
-
-            /* Expect 'then' */
-            if (i < count && starts_with_keyword(skip_ws(lines[i]), "then")) {
-                i++;  /* past 'then' */
-            } else {
-                printf("sh: expected 'then'\n");
-                continue;
-            }
-
-            /* Collect then-block */
-            char then_block[MAX_BLOCK_LINES][MAX_CMD_LEN];
-            int then_count = 0;
-            int r = collect_block_from_array(lines, count, &i,
-                                             then_block, &then_count, MAX_BLOCK_LINES,
-                                             "fi", "else");
-            if (r == 2) {
-                /* Hit 'else' — collect else-block */
-                char else_block[MAX_BLOCK_LINES][MAX_CMD_LEN];
-                int else_count = 0;
-                collect_block_from_array(lines, count, &i,
-                                         else_block, &else_count, MAX_BLOCK_LINES,
-                                         "fi", (char *)0);
-                if (cond_ok)
-                    execute_block(then_block, then_count);
-                else
-                    execute_block(else_block, else_count);
-            } else {
-                /* Hit 'fi' directly */
-                if (cond_ok)
-                    execute_block(then_block, then_count);
-            }
-            continue;
+            i = block_if(lines, count, i, trimmed);
+        } else if (starts_with_keyword(trimmed, "while")) {
+            i = block_while(lines, count, i, trimmed);
+        } else if (starts_with_keyword(trimmed, "for")) {
+            i = block_for(lines, count, i, trimmed);
+        } else {
+            /* Regular line */
+            execute_line(lines[i]);
+            i++;
         }
-
-        /* --- while/do/done --- */
-        if (starts_with_keyword(trimmed, "while")) {
-            const char *cond = trimmed + 5;
-            while (*cond == ' ' || *cond == '\t') cond++;
-            char cond_str[MAX_CMD_LEN];
-            strncpy(cond_str, cond, MAX_CMD_LEN - 1);
-            cond_str[MAX_CMD_LEN - 1] = '\0';
-
-            i++;  /* past 'while' line */
-
-            /* Expect 'do' */
-            if (i < count && starts_with_keyword(skip_ws(lines[i]), "do")) {
-                i++;  /* past 'do' */
-            } else {
-                printf("sh: expected 'do'\n");
-                continue;
-            }
-
-            /* Collect body */
-            char body[MAX_BLOCK_LINES][MAX_CMD_LEN];
-            int body_count = 0;
-            int save_i = i;
-            collect_block_from_array(lines, count, &i,
-                                     body, &body_count, MAX_BLOCK_LINES,
-                                     "done", (char *)0);
-
-            /* Loop */
-            while (1) {
-                execute_line(cond_str);
-                char *exitcode = getenv("?");
-                if (!(exitcode && exitcode[0] == '0' && exitcode[1] == '\0'))
-                    break;
-                execute_block(body, body_count);
-            }
-            continue;
-        }
-
-        /* --- for/in/do/done --- */
-        if (starts_with_keyword(trimmed, "for")) {
-            /* Parse: for VAR in arg1 arg2 ... */
-            char for_line[MAX_CMD_LEN];
-            strncpy(for_line, trimmed, MAX_CMD_LEN - 1);
-            for_line[MAX_CMD_LEN - 1] = '\0';
-
-            char *for_argv[MAX_ARGS];
-            int for_argc = parse_cmd(for_line + 3, for_argv, MAX_ARGS);  /* skip "for" */
-
-            if (for_argc < 3 || strcmp(for_argv[1], "in") != 0) {
-                printf("sh: usage: for VAR in args...\n");
-                i++;
-                continue;
-            }
-
-            char varname[32];
-            strncpy(varname, for_argv[0], sizeof(varname) - 1);
-            varname[sizeof(varname) - 1] = '\0';
-
-            /* Collect the word list before parse_cmd destroys for_line */
-            char words[MAX_ARGS][MAX_CMD_LEN];
-            int nwords = 0;
-            int w;
-            for (w = 2; w < for_argc && nwords < MAX_ARGS; w++) {
-                strncpy(words[nwords], for_argv[w], MAX_CMD_LEN - 1);
-                words[nwords][MAX_CMD_LEN - 1] = '\0';
-                nwords++;
-            }
-
-            i++;  /* past 'for' line */
-
-            /* Expect 'do' */
-            if (i < count && starts_with_keyword(skip_ws(lines[i]), "do")) {
-                i++;  /* past 'do' */
-            } else {
-                printf("sh: expected 'do'\n");
-                continue;
-            }
-
-            /* Collect body */
-            char body[MAX_BLOCK_LINES][MAX_CMD_LEN];
-            int body_count = 0;
-            collect_block_from_array(lines, count, &i,
-                                     body, &body_count, MAX_BLOCK_LINES,
-                                     "done", (char *)0);
-
-            /* Iterate */
-            for (w = 0; w < nwords; w++) {
-                setenv(varname, words[w]);
-                execute_block(body, body_count);
-            }
-            continue;
-        }
-
-        /* Regular line */
-        execute_line(lines[i]);
-        i++;
     }
 }
 
@@ -822,7 +846,8 @@ static void execute_block(char lines[][MAX_CMD_LEN], int count)
  * Handle 'if' at top level — reads then/else/fi from input.
  * 'cond' is the condition command (text after "if ").
  */
-static void handle_if(const char *cond)
+static void __attribute__((noinline))
+handle_if(const char *cond)
 {
     char line[MAX_CMD_LEN];
     int r;
@@ -838,24 +863,24 @@ static void handle_if(const char *cond)
         return;
     }
 
-    /* Collect then-block */
-    char then_block[MAX_BLOCK_LINES][MAX_CMD_LEN];
-    int then_count = 0;
-    r = collect_block(then_block, &then_count, MAX_BLOCK_LINES, "fi", "else");
+    /* Keep only the branch that runs (see block_if): one 2 KB buffer. */
+    char block[MAX_BLOCK_LINES][MAX_CMD_LEN];
+    int then_count = 0, else_count = 0;
+    r = collect_block(cond_ok ? block : (char (*)[MAX_CMD_LEN])0,
+                      &then_count, MAX_BLOCK_LINES, "fi", "else");
 
     if (r == 2) {
-        /* Hit 'else' — collect else-block */
-        char else_block[MAX_BLOCK_LINES][MAX_CMD_LEN];
-        int else_count = 0;
-        collect_block(else_block, &else_count, MAX_BLOCK_LINES, "fi", (char *)0);
+        /* Hit 'else' — collect or skip the else-block */
+        collect_block(cond_ok ? (char (*)[MAX_CMD_LEN])0 : block,
+                      &else_count, MAX_BLOCK_LINES, "fi", (char *)0);
         if (cond_ok)
-            execute_block(then_block, then_count);
+            execute_block(block, then_count);
         else
-            execute_block(else_block, else_count);
+            execute_block(block, else_count);
     } else if (r == 1) {
         /* Hit 'fi' directly */
         if (cond_ok)
-            execute_block(then_block, then_count);
+            execute_block(block, then_count);
     } else {
         printf("sh: unexpected end of input in 'if'\n");
     }
@@ -865,7 +890,8 @@ static void handle_if(const char *cond)
  * Handle 'while' at top level.
  * 'cond' is the condition command (text after "while ").
  */
-static void handle_while(const char *cond)
+static void __attribute__((noinline))
+handle_while(const char *cond)
 {
     char line[MAX_CMD_LEN];
     char cond_str[MAX_CMD_LEN];
@@ -901,7 +927,8 @@ static void handle_while(const char *cond)
  * Handle 'for' at top level.
  * 'rest' is everything after "for " (e.g., "x in a b c").
  */
-static void handle_for(const char *rest)
+static void __attribute__((noinline))
+handle_for(const char *rest)
 {
     char line[MAX_CMD_LEN];
     char rest_buf[MAX_CMD_LEN];
