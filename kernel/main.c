@@ -57,10 +57,23 @@ void c_trap_handler(trap_frame_t *tf) {
     } else if (cause & MCAUSE_INTERRUPT) {
         printf("KERNEL: Unexpected interrupt, mcause=0x%x\n", cause);
         trap_ret(tf);
-    } else {
+    } else if (tf->mepc < PROC_MEM_START) {
+        /* An exception in the kernel itself is a kernel bug: stop. */
         printf("KERNEL: Exception! mcause=%d, mepc=0x%x\n", cause, tf->mepc);
         printf("KERNEL: Halting.\n");
         while (1) {}
+    } else {
+        /* An exception in a user program (illegal instruction, misaligned
+         * access, ebreak, ...): report it and end that process as if it had
+         * called exit(-1), so that the rest of the system carries on. */
+        printf("KERNEL: Exception! mcause=%d mepc=0x%x pid=%d (%s) - process killed\n",
+               cause, tf->mepc, proc_table[current_proc].pid,
+               proc_table[current_proc].name);
+        if (kill_current_process(tf, -1)) {
+            program_should_exit = 1;   /* it was the top-level shell */
+            return;
+        }
+        /* not reached: sys_exit switched to another process */
     }
 }
 
