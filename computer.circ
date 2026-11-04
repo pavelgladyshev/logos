@@ -393,6 +393,7 @@
     <comp lib="11" loc="(220,590)" name="RV32IM CPU">
       <a name="hexRegisters" val="true" />
       <a name="dataBus" val="separate" />
+      <a name="tlbEntries" val="16" />
     </comp>
     <comp lib="11" loc="(980,1080)" name="Block Storage"><a name="dataBus" val="separate" /></comp>
     <comp lib="11" loc="(1020,480)" name="Timer"><a name="dataBus" val="separate" /></comp>
