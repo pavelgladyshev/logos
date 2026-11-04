@@ -218,7 +218,17 @@ static int32_t sys_write(trap_frame_t *tf) {
          * to survive a call. */
         struct process *cur = &proc_table[current_proc];
         int pipe_idx = (int)fde->inode;
-        result = pipe_write(pipe_idx, buf, len);
+        struct pipe *pp = &pipe_table[pipe_idx];
+        if (cur->pipe_written == 0 && len <= PIPE_BUF_SIZE &&
+            pp->read_refs > 0 && PIPE_BUF_SIZE - pp->count < len) {
+            /* POSIX: a write of at most PIPE_BUF bytes is atomic - it goes
+             * into the pipe in one piece, never mixed with another writer's
+             * data.  If it does not fit yet, write nothing and sleep until
+             * readers make room; only larger writes are split. */
+            result = -2;
+        } else {
+            result = pipe_write(pipe_idx, buf, len);
+        }
         if (result > 0 && (uint32_t)result < len) {
             cur->pipe_written += (uint32_t)result;
             tf->a1 += (uint32_t)result;
