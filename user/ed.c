@@ -101,7 +101,7 @@ static void cmd_print(int from, int to)
 {
     int i;
     for (i = from; i <= to && i < nlines; i++) {
-        printf("%3d: %s\n", i + 1, lines[i]);
+        printf("%d: %s\n", i + 1, lines[i]);   /* libc's printf has no field widths */
     }
 }
 
