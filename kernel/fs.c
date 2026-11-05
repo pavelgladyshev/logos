@@ -9,7 +9,7 @@
 
 /* Global filesystem state */
 struct superblock sb;
-uint8_t block_buf[BLOCK_SIZE];
+uint8_t block_buf[BLOCK_SIZE] __attribute__((aligned(4)));   /* word-aligned for memcpy */
 
 /*
  * Filesystem format
