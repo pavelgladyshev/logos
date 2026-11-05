@@ -44,11 +44,23 @@ void strcpy(char *dst, const char *src) {
 
 void memset(void *dst, int c, uint32_t n) {
     uint8_t *d = (uint8_t *)dst;
-    while (n--) *d++ = (uint8_t)c;
+    /* Whole words while the destination is word-aligned (see memcpy) */
+    if (((uint32_t)d & 3) == 0) {
+        uint32_t w = (uint8_t)c * 0x01010101u;    /* the byte in all four bytes of a word */
+        for (; n >= 4; n -= 4, d += 4)
+            *(uint32_t *)d = w;
+    }
+    while (n--) *d++ = (uint8_t)c;    /* the rest byte by byte */
 }
 
 void memcpy(void *dst, const void *src, uint32_t n) {
     uint8_t *d = (uint8_t *)dst;
     const uint8_t *s = (const uint8_t *)src;
-    while (n--) *d++ = *s++;
+    /* Whole words while both are word-aligned: a lw/sw at an address that is
+     * not a multiple of 4 traps (address misaligned). */
+    if ((((uint32_t)d | (uint32_t)s) & 3) == 0) {
+        for (; n >= 4; n -= 4, d += 4, s += 4)
+            *(uint32_t *)d = *(const uint32_t *)s;
+    }
+    while (n--) *d++ = *s++;    /* the rest, and unaligned copies, byte by byte */
 }
