@@ -84,11 +84,26 @@ int block_alloc(void) {
         return FS_ERR_NO_SPACE;
     }
 
-    /* Search for a free block starting from data area */
+    /* Search for a free block starting from data area. A bitmap block holds the
+     * bits of BLOCK_SIZE * 8 blocks, so it is read once for all of them, not once
+     * a bit as bitmap_get() would. */
+    uint32_t loaded = 0;    /* bitmap block in block_buf (0, the superblock: none) */
     for (uint32_t b = sb.data_start; b < sb.total_blocks; b++) {
-        if (bitmap_get(b) == 0) {
+        uint32_t bitmap_block = sb.bitmap_start + (b / (BLOCK_SIZE * 8));
+        uint32_t byte_offset = (b % (BLOCK_SIZE * 8)) / 8;
+        uint32_t bit_offset = b % 8;
+
+        if (bitmap_block != loaded) {
+            if (block_read(bitmap_block, block_buf) != FS_OK) {
+                return FS_ERR_IO;
+            }
+            loaded = bitmap_block;
+        }
+
+        if (((block_buf[byte_offset] >> bit_offset) & 1) == 0) {
             /* Found free block, mark it as used */
-            if (bitmap_set(b, 1) != FS_OK) {
+            block_buf[byte_offset] |= (1 << bit_offset);
+            if (block_write(bitmap_block, block_buf) != FS_OK) {
                 return FS_ERR_IO;
             }
             sb.free_blocks--;
