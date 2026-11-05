@@ -157,7 +157,7 @@ User programs communicate with the kernel via the `ecall` instruction. The sysca
 | 0 | sys_exit | a0=status | Terminate program |
 | 1 | sys_read | a0=fd, a1=buf, a2=len | Read from file descriptor |
 | 2 | sys_write | a0=fd, a1=buf, a2=len | Write to file descriptor |
-| 3 | sys_open | a0=path, a1=flags | Open file, return fd (supports relative paths) |
+| 3 | sys_open | a0=path, a1=flags | Open file, return fd (supports relative paths); flags: O_RDONLY(0), O_WRONLY(1), O_CREAT(0x100), O_TRUNC(0x200), O_APPEND(0x400) |
 | 4 | sys_close | a0=fd | Close file descriptor |
 | 5 | sys_spawn | a0=path, a1=argv, a2=envp | Launch child in new slot with inherited env; returns child's exit code (envp overrides child's env if non-NULL) |
 | 6 | sys_readdir | a0=path, a1=buf, a2=max | List directory entries |

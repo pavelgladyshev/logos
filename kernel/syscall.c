@@ -20,6 +20,14 @@
 /* Console minor device number */
 #define CONSOLE_MINOR  0
 
+/* Open flags (must match user/libc.h) */
+#define OPEN_CREAT   0x100
+#define OPEN_TRUNC   0x200
+#define OPEN_APPEND  0x400
+
+/* Forward declaration — defined later in this file */
+static int resolve_parent(const char *path, uint32_t *parent_ino, const char **name);
+
 /*
  * Get a file descriptor entry for the current process.
  * Returns pointer to fd_entry, or NULL if fd is invalid.
@@ -247,11 +255,14 @@ static int resolve_path(const char *path, char *abs_path, int abs_size) {
 
 /*
  * sys_open - Open a file
- * a0 = path, a1 = flags (ignored for now, read-only)
+ * a0 = path, a1 = flags
+ * Flags: O_RDONLY(0), O_WRONLY(1), O_RDWR(2), O_CREAT(0x100),
+ *        O_TRUNC(0x200), O_APPEND(0x400)
  * Returns: file descriptor, or negative error
  */
 static int32_t sys_open(trap_frame_t *tf) {
     const char *path = (const char *)tf->a0;
+    uint32_t flags = tf->a1;
     char resolved[MAX_ARG_LEN];
     uint32_t ino;
     uint8_t type;
@@ -267,13 +278,33 @@ static int32_t sys_open(trap_frame_t *tf) {
     /* Look up the path */
     result = fs_open(resolved, &ino);
     if (result != FS_OK) {
-        return -1;  /* ENOENT or other error */
+        /* File not found — create if O_CREAT is set */
+        if (flags & OPEN_CREAT) {
+            uint32_t parent_ino;
+            const char *name;
+            result = resolve_parent(resolved, &parent_ino, &name);
+            if (result != FS_OK) {
+                return -1;
+            }
+            result = file_create(parent_ino, name);
+            if (result < 0) {
+                return -1;
+            }
+            ino = (uint32_t)result;
+        } else {
+            return -1;  /* ENOENT */
+        }
     }
 
     /* Get inode type */
     result = inode_get_type(ino, &type);
     if (result != FS_OK) {
         return -1;
+    }
+
+    /* Handle O_TRUNC: truncate existing regular file to zero length */
+    if ((flags & OPEN_TRUNC) && type == FT_FILE) {
+        file_truncate(ino, 0);
     }
 
     /* Allocate a file descriptor */
@@ -286,6 +317,14 @@ static int32_t sys_open(trap_frame_t *tf) {
     fde->inode = ino;
     fde->offset = 0;
     fde->type = type;
+
+    /* Handle O_APPEND: set offset to end of file */
+    if ((flags & OPEN_APPEND) && type == FT_FILE) {
+        uint32_t size;
+        if (inode_get_size(ino, &size) == FS_OK) {
+            fde->offset = size;
+        }
+    }
 
     /* For character devices, get major/minor from inode */
     if (type == FT_CHARDEV) {
