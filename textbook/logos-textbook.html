@@ -614,8 +614,7 @@ systems, they are stored in the process's own memory (on the stack, above
 <code>argv</code>). What are the trade-offs of each approach?</li>
 
 <li>Write a user program that creates a file <code>/tmp/test</code>, writes some
-data to it, closes it, reopens it, reads the data back, and verifies it matches.
-What system calls does this require that log<i>OS</i> does not currently provide?</li>
+data to it, closes it, reopens it, reads the data back, and verifies it matches.</li>
 </ol>
 
 <!-- ============================================================ -->
@@ -2084,8 +2083,11 @@ uses a separate <code>local_buf</code>. Why?)</li>
 <li>What is the maximum number of files that can exist in the log<i>OS</i>
 filesystem? Consider both the inode limit and the directory entry limit.</li>
 
-<li>Implement a <code>file_create</code> system call that creates a new
-empty file at a given path.</li>
+<li><code>open()</code> creates a missing file when its flags include <code>O_CREAT</code>
+(see <code>sys_open</code> in <code>kernel/syscall.c</code>). Add an <code>O_EXCL</code> flag:
+<code>open()</code> with <code>O_CREAT | O_EXCL</code> fails if the file already exists. Why is this
+different from checking with <code>stat()</code> before creating the file, on a system that runs
+several processes at once? Does it matter in log<i>OS</i>?</li>
 
 <li>The <code>dir_remove</code> function marks an entry as free but does not
 compact the remaining entries. Over time, this could lead to wasted space.
