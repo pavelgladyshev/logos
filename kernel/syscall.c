@@ -32,7 +32,6 @@
 #define OPEN_APPEND  0x400
 
 /* Forward declaration — defined later in this file */
-static int resolve_parent(const char *path, uint32_t *parent_ino, const char **name);
 
 /*
  * Translate a user virtual address + length to a kernel-accessible physical
@@ -432,7 +431,7 @@ static int32_t sys_open(trap_frame_t *tf) {
         if (flags & OPEN_CREAT) {
             uint32_t parent_ino;
             const char *name;
-            result = resolve_parent(resolved, &parent_ino, &name);
+            result = fs_open_parent(resolved, &parent_ino, &name);
             if (result != FS_OK) {
                 return -1;
             }
@@ -1076,55 +1075,6 @@ static int32_t sys_pipe(trap_frame_t *tf) {
 }
 
 /*
- * resolve_parent - Split a path into parent directory inode and final name.
- * E.g. "/foo/bar" -> parent_ino = inode of "/foo", *name = "bar"
- *      "/bar"     -> parent_ino = root inode,      *name = "bar"
- * Returns FS_OK on success, negative error on failure.
- */
-static int resolve_parent(const char *path, uint32_t *parent_ino, const char **name) {
-    const char *last_slash;
-    const char *p;
-
-    if (path == (const char *)0 || path[0] != '/') {
-        return FS_ERR_INVALID;
-    }
-
-    /* Find the last '/' */
-    last_slash = path;
-    for (p = path; *p != '\0'; p++) {
-        if (*p == '/') {
-            last_slash = p;
-        }
-    }
-
-    *name = last_slash + 1;
-
-    /* Name must not be empty */
-    if (**name == '\0') {
-        return FS_ERR_INVALID;
-    }
-
-    if (last_slash == path) {
-        /* Path is "/something" - parent is root */
-        *parent_ino = fs_root_inode();
-        return FS_OK;
-    }
-
-    /* Temporarily null-terminate the parent portion to resolve it.
-     * We need a buffer since path may be in user read-only memory. */
-    uint32_t parent_len = last_slash - path;
-    if (parent_len >= MAX_ARG_LEN) {
-        return FS_ERR_INVALID;
-    }
-
-    char parent_path[MAX_ARG_LEN];
-    memcpy(parent_path, path, parent_len);
-    parent_path[parent_len] = '\0';
-
-    return fs_open(parent_path, parent_ino);
-}
-
-/*
  * sys_readdir - List directory entries
  * a0 = path, a1 = dirent buffer, a2 = max_entries
  * Returns: number of entries read, or negative error
@@ -1183,7 +1133,7 @@ static int32_t sys_mkdir(trap_frame_t *tf) {
         return FS_ERR_INVALID;
     }
 
-    int result = resolve_parent(resolved, &parent_ino, &name);
+    int result = fs_open_parent(resolved, &parent_ino, &name);
     if (result != FS_OK) {
         return result;
     }
@@ -1209,7 +1159,7 @@ static int32_t sys_rmdir(trap_frame_t *tf) {
         return FS_ERR_INVALID;
     }
 
-    int result = resolve_parent(resolved, &parent_ino, &name);
+    int result = fs_open_parent(resolved, &parent_ino, &name);
     if (result != FS_OK) {
         return result;
     }
@@ -1237,7 +1187,7 @@ static int32_t sys_mknod(trap_frame_t *tf) {
         return FS_ERR_INVALID;
     }
 
-    int result = resolve_parent(resolved, &parent_ino, &name);
+    int result = fs_open_parent(resolved, &parent_ino, &name);
     if (result != FS_OK) {
         return result;
     }
@@ -1435,7 +1385,7 @@ static int32_t sys_unlink(trap_frame_t *tf) {
         return FS_ERR_INVALID;
     }
 
-    int result = resolve_parent(resolved, &parent_ino, &name);
+    int result = fs_open_parent(resolved, &parent_ino, &name);
     if (result != FS_OK) {
         return result;
     }
@@ -1456,7 +1406,6 @@ static int32_t sys_link(trap_frame_t *tf) {
     uint32_t target_ino;
     uint32_t link_parent_ino;
     const char *link_name;
-    struct inode in;
 
     if (copyustr(ktarget, tf->a0, MAX_ARG_LEN) < 0) return -1;
     if (copyustr(klinkpath, tf->a1, MAX_ARG_LEN) < 0) return -1;
@@ -1469,28 +1418,15 @@ static int32_t sys_link(trap_frame_t *tf) {
         return result;
     }
 
-    if (inode_read(target_ino, &in) != FS_OK) {
-        return FS_ERR_IO;
-    }
-    if (in.type != FT_FILE) {
-        return FS_ERR_INVALID;
-    }
-
     if (resolve_path(klinkpath, resolved_link, MAX_ARG_LEN) < 0) {
         return FS_ERR_INVALID;
     }
-    result = resolve_parent(resolved_link, &link_parent_ino, &link_name);
+    result = fs_open_parent(resolved_link, &link_parent_ino, &link_name);
     if (result != FS_OK) {
         return result;
     }
 
-    result = dir_add(link_parent_ino, link_name, target_ino);
-    if (result != FS_OK) {
-        return result;
-    }
-
-    in.link_count++;
-    return inode_write(target_ino, &in);
+    return fs_link(target_ino, link_parent_ino, link_name);
 }
 
 /*
@@ -1505,7 +1441,6 @@ static int32_t sys_rename(trap_frame_t *tf) {
     char resolved_new[MAX_ARG_LEN];
     uint32_t old_parent_ino, new_parent_ino;
     const char *old_name, *new_name;
-    uint32_t file_ino;
 
     if (copyustr(koldpath, tf->a0, MAX_ARG_LEN) < 0) return -1;
     if (copyustr(knewpath, tf->a1, MAX_ARG_LEN) < 0) return -1;
@@ -1513,12 +1448,7 @@ static int32_t sys_rename(trap_frame_t *tf) {
     if (resolve_path(koldpath, resolved_old, MAX_ARG_LEN) < 0) {
         return FS_ERR_INVALID;
     }
-    int result = resolve_parent(resolved_old, &old_parent_ino, &old_name);
-    if (result != FS_OK) {
-        return result;
-    }
-
-    result = dir_lookup(old_parent_ino, old_name, &file_ino);
+    int result = fs_open_parent(resolved_old, &old_parent_ino, &old_name);
     if (result != FS_OK) {
         return result;
     }
@@ -1526,29 +1456,12 @@ static int32_t sys_rename(trap_frame_t *tf) {
     if (resolve_path(knewpath, resolved_new, MAX_ARG_LEN) < 0) {
         return FS_ERR_INVALID;
     }
-    result = resolve_parent(resolved_new, &new_parent_ino, &new_name);
+    result = fs_open_parent(resolved_new, &new_parent_ino, &new_name);
     if (result != FS_OK) {
         return result;
     }
 
-    result = dir_add(new_parent_ino, new_name, file_ino);
-    if (result != FS_OK) {
-        return result;
-    }
-
-    result = dir_remove(old_parent_ino, old_name);
-    if (result != FS_OK) {
-        return result;
-    }
-
-    /* If directory, update ".." to point to new parent */
-    struct inode in;
-    if (inode_read(file_ino, &in) == FS_OK && in.type == FT_DIR) {
-        dir_remove(file_ino, "..");
-        dir_add(file_ino, "..", new_parent_ino);
-    }
-
-    return FS_OK;
+    return fs_rename(old_parent_ino, old_name, new_parent_ino, new_name);
 }
 
 /*

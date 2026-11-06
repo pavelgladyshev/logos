@@ -232,3 +232,108 @@ int fs_mknod(uint32_t dir_ino, const char *name, uint8_t major, uint8_t minor) {
 
     return ino;
 }
+
+/*
+ * fs_open_parent - Split a path into parent directory inode and final name.
+ * E.g. "/foo/bar" -> parent_ino = inode of "/foo", *name = "bar"
+ *      "/bar"     -> parent_ino = root inode,      *name = "bar"
+ * Returns FS_OK on success, negative error on failure.
+ */
+int fs_open_parent(const char *path, uint32_t *parent_ino, const char **name) {
+    const char *last_slash;
+    const char *p;
+
+    if (path == (const char *)0 || path[0] != '/') {
+        return FS_ERR_INVALID;
+    }
+
+    /* Find the last '/' */
+    last_slash = path;
+    for (p = path; *p != '\0'; p++) {
+        if (*p == '/') {
+            last_slash = p;
+        }
+    }
+
+    *name = last_slash + 1;
+
+    /* Name must not be empty */
+    if (**name == '\0') {
+        return FS_ERR_INVALID;
+    }
+
+    if (last_slash == path) {
+        /* Path is "/something" - parent is root */
+        *parent_ino = fs_root_inode();
+        return FS_OK;
+    }
+
+    /* Temporarily null-terminate the parent portion to resolve it.
+     * We need a buffer since path may be in user read-only memory. */
+    uint32_t parent_len = last_slash - path;
+    if (parent_len >= FS_MAX_PATH) {
+        return FS_ERR_INVALID;
+    }
+
+    char parent_path[FS_MAX_PATH];
+    memcpy(parent_path, path, parent_len);
+    parent_path[parent_len] = '\0';
+
+    return fs_open(parent_path, parent_ino);
+}
+
+/*
+ * fs_link - Create a hard link: name in directory dir_ino for the file target_ino
+ * Returns FS_OK on success, negative error on failure.
+ */
+int fs_link(uint32_t target_ino, uint32_t dir_ino, const char *name) {
+    struct inode in;
+
+    if (inode_read(target_ino, &in) != FS_OK) {
+        return FS_ERR_IO;
+    }
+    if (in.type != FT_FILE) {
+        return FS_ERR_INVALID;
+    }
+
+    int result = dir_add(dir_ino, name, target_ino);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    in.link_count++;
+    return inode_write(target_ino, &in);
+}
+
+/*
+ * fs_rename - Rename/move the entry old_name of directory old_dir_ino to new_name
+ * in directory new_dir_ino (a file or a directory).
+ * Returns FS_OK on success, negative error on failure.
+ */
+int fs_rename(uint32_t old_dir_ino, const char *old_name, uint32_t new_dir_ino, const char *new_name) {
+    uint32_t file_ino;
+
+    int result = dir_lookup(old_dir_ino, old_name, &file_ino);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    result = dir_add(new_dir_ino, new_name, file_ino);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    result = dir_remove(old_dir_ino, old_name);
+    if (result != FS_OK) {
+        return result;
+    }
+
+    /* If directory, update ".." to point to new parent */
+    struct inode in;
+    if (inode_read(file_ino, &in) == FS_OK && in.type == FT_DIR) {
+        dir_remove(file_ino, "..");
+        dir_add(file_ino, "..", new_dir_ino);
+    }
+
+    return FS_OK;
+}
