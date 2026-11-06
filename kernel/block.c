@@ -9,8 +9,13 @@
 
 /*
  * Block device operations
+ *
+ * On the host (NATIVE_BUILD: fstool and the FUSE driver logosfs), these two are
+ * fstool/native_block.c's, which read and write a disk image file; the rest of
+ * this file is the same code there as in the kernel.
  */
 
+#ifndef NATIVE_BUILD
 int block_read(uint32_t block_num, void *buf) {
     BLOCK_MEM_ADDR = (uint32_t)buf;
     BLOCK_NUM = block_num;
@@ -38,6 +43,7 @@ int block_write(uint32_t block_num, const void *buf) {
     }
     return FS_OK;
 }
+#endif /* NATIVE_BUILD */
 
 
 /*

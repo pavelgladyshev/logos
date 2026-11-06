@@ -156,7 +156,7 @@ check-pie: $(USER_PROG_OBJS) $(USER_COMMON_OBJS)
 # ====================================
 
 # fstool compiles kernel filesystem source files natively (with NATIVE_BUILD)
-FSTOOL_SRCS = fstool/fstool.c fstool/native_block.c kernel/inode.c \
+FSTOOL_SRCS = fstool/fstool.c fstool/native_block.c kernel/block.c kernel/inode.c \
               kernel/dir.c kernel/file.c kernel/fs.c kernel/device.c
 
 FSTOOL_OBJS = $(patsubst %.c,%.native.o,$(FSTOOL_SRCS))
