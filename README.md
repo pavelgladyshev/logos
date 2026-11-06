@@ -174,6 +174,43 @@ Managed on the host with `fstool`:
 ./fstool/fstool ls block_storage.bin /
 ```
 
+### Mounting a disk image on your computer (logosfs)
+
+`fstool/logosfs` mounts a disk image as a folder of your computer, so that `ls`, `cp`, an
+editor or the Finder work on LogOS's files. It is a file system driver of your computer's
+kernel, through FUSE (File system in USErspace): the kernel passes the file operations on the
+folder to logosfs, and logosfs answers them with LogOS's own file system code (`kernel/fs.c`,
+`dir.c`, `file.c`, `inode.c`, `block.c`, built for the host as for `fstool`). Each of its
+operations calls what the LogOS system call of the same job calls, so a change to LogOS's file
+system is in logosfs too after `make logosfs`.
+
+It needs FUSE:
+- **macOS**: install [macFUSE](https://macfuse.github.io) 5, run
+  `/Library/Filesystems/macfuse.fs/Contents/Resources/macfuse.app/Contents/MacOS/macfuse install --components file-system-extensions`
+  in a terminal, and switch macFUSE on in System Settings → General → Login Items & Extensions →
+  File System Extensions (ⓘ). No kernel extension is needed: logosfs runs through Apple's FSKit
+  (`-o backend=fskit`).
+- **Linux** (Debian, Ubuntu): `sudo apt install fuse3 libfuse3-dev pkg-config`.
+
+```bash
+make logosfs
+mkdir mnt
+./fstool/logosfs block_storage.bin mnt -o backend=fskit    # on Linux without -o backend=fskit
+ls -l mnt/bin
+cp notes.txt mnt/etc/
+umount mnt                                                  # on Linux: fusermount3 -u mnt
+```
+
+Unmount before booting the image in Logisim or writing it to an SD card. LogOS keeps no owners,
+permissions, times or extended attributes: logosfs shows your user, the image file's time and fixed
+permissions, and drops changes to them. Names have at most 27 characters, and a file at most
+30,720 bytes (60 direct blocks).
+
+On macOS with FSKit, `ln` makes the hard link but reports an I/O error all the same (macFUSE's
+FSKit backend wants a hard link to come back as the original's node, which FUSE's path-based
+interface does not do), and `ls -l` may show the first name's old link count. Writes are cached
+there too: a full disk or a file too large shows as an I/O error when the file is closed.
+
 ### System Calls
 
 Programs use `ecall` with the syscall number in `a7` and arguments in `a0`-`a5`:
@@ -251,7 +288,7 @@ Programs are compiled as position-independent executables (PIE) and loaded at ar
 | `boot/` | Bootloader — ROM entry point, minimal FS reader, block device DMA |
 | `kernel/` | Kernel — filesystem, process management, syscalls, trap handling, ELF loader, pipes |
 | `user/` | User space — libc, shell, and utility programs |
-| `fstool/` | Host tool for building filesystem images |
+| `fstool/` | Host tools: `fstool` builds filesystem images, `logosfs` mounts them (FUSE) |
 | `textbook/` | Course materials |
 
 ## License

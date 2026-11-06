@@ -14,6 +14,7 @@
 #   make all        bootloader ROM image and a fresh disk image (block_storage.bin)
 #   make run        LogOS in Logisim's text mode, the fast way (Ctrl-C stops it)
 #   make gui        computer.circ in Logisim's window
+#   make logosfs    the FUSE driver that mounts block_storage.bin on your computer
 
 # ====================================
 # Common configuration
@@ -189,6 +190,22 @@ FSTOOL_BIN = fstool/fstool
 $(FSTOOL_BIN): $(FSTOOL_OBJS)
 	$(NATIVE_CC) -Wall -Wextra -O2 -o $(FSTOOL_BIN) $(FSTOOL_OBJS)
 
+# logosfs: a LogOS disk image mounted on the host through FUSE, with the same kernel
+# file system code as fstool. Not part of "all": it needs FUSE (macFUSE on macOS,
+# libfuse3 and its headers on Linux). See README.md.
+LOGOSFS_BIN = fstool/logosfs
+LOGOSFS_OBJS = fstool/logosfs.native.o $(filter-out fstool/fstool.native.o,$(FSTOOL_OBJS))
+FUSE_PKG = PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$$PKG_CONFIG_PATH pkg-config fuse3
+
+fstool/logosfs.native.o: fstool/logosfs.c $(FSTOOL_HEADERS)
+	$(NATIVE_CC) -DNATIVE_BUILD -DFUSE_DARWIN_ENABLE_EXTENSIONS=0 $$($(FUSE_PKG) --cflags) \
+		-Wall -Wextra -O2 -iquote kernel -iquote fstool -c $< -o $@
+
+$(LOGOSFS_BIN): $(LOGOSFS_OBJS)
+	$(NATIVE_CC) -Wall -Wextra -O2 -o $(LOGOSFS_BIN) $(LOGOSFS_OBJS) $$($(FUSE_PKG) --libs)
+
+logosfs: $(LOGOSFS_BIN)
+
 # ====================================
 # Filesystem image
 # ====================================
@@ -291,7 +308,7 @@ clean-user:
 	rm -f $(USER_PROG_OBJS) $(USER_COMMON_OBJS)
 
 clean-fstool:
-	rm -f $(FSTOOL_OBJS) $(FSTOOL_BIN)
+	rm -f $(FSTOOL_OBJS) $(FSTOOL_BIN) fstool/logosfs.native.o $(LOGOSFS_BIN)
 
 clean: clean-boot clean-kernel
 
@@ -299,5 +316,5 @@ clean-all: clean clean-user clean-fstool
 	rm -rf $(BUILD_DIR)
 	rm -f boot-rom boot-rom.txt block_storage.bin
 
-.PHONY: all clean clean-all clean-boot clean-kernel clean-user clean-fstool \
+.PHONY: all clean clean-all clean-boot clean-kernel clean-user clean-fstool logosfs \
         fs-image fstool user-programs check-pie compile-for-qemu qemu qemu-gdb logisim run gui

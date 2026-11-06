@@ -17,6 +17,7 @@ make run                  # LogOS in Logisim's text mode (--tty raw); makes bloc
 make gui                  # computer.circ in Logisim's window (on WSL: Java for Windows if on PATH, else WSLg)
 make logisim              # Fetch logisim-evolution-ucd-$(LOGISIM_VERSION)-all.jar from the releases
 make fstool               # Build native fstool utility for host system
+make logosfs              # Build fstool/logosfs, the FUSE driver (needs macFUSE or libfuse3)
 make fs-image             # Create filesystem image (block_storage.bin)
 make user-programs        # Build all user programs
 make clean                # Clean object files and executables
@@ -37,6 +38,20 @@ environment value wins.
 ./fstool mkdir <blockfile> <path>           # Create directory
 ./fstool add <blockfile> <path> <hostfile>  # Copy host file into filesystem
 ```
+
+### logosfs Usage
+
+```bash
+./fstool/logosfs <blockfile> <mountpoint> -o backend=fskit   # macOS (macFUSE 5, FSKit); Linux: no -o
+umount <mountpoint>                                          # Linux: fusermount3 -u <mountpoint>
+```
+
+The native builds (fstool, logosfs) compile the kernel's file system code itself, `kernel/block.c`
+included; only `block_read()`/`block_write()` come from `fstool/native_block.c` (the image file).
+logosfs's FUSE operations call the same functions as the matching system calls (`fs_open`,
+`fs_open_parent`, `file_create`, `file_read`, `file_write`, `file_truncate`, `file_delete`,
+`fs_mkdir`, `fs_rmdir`, `fs_link`, `fs_rename`, `dir_list`); it runs single-threaded (`-s`)
+because the code shares one `block_buf`.
 
 ## Running
 
@@ -85,6 +100,7 @@ Key modules organized by directory:
 | Shell | `shell.c` | Interactive shell (`/bin/sh`) |
 | **Host Tools** | | |
 | Host Tool | `fstool.c`, `native_block.c` | Native utility to manage filesystem images |
+| FUSE Driver | `logosfs.c` | Mounts a filesystem image on the host (macFUSE/FSKit, Linux FUSE) |
 
 **Filesystem Layout (1024 blocks × 512 bytes):**
 - Block 0: Superblock
