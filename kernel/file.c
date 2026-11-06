@@ -309,12 +309,14 @@ int file_truncate(uint32_t ino, uint32_t new_size) {
             in.blocks[i] = 0;
         }
     }
-    /* Free indirect block entries */
+    /* Free indirect block entries. block_free() reads the bitmap into block_buf,
+     * so the entries are copied out of block_buf before any of them is freed. */
     if (in.indirect != 0) {
+        static uint16_t entries[INDIRECT_ENTRIES];
+        block_read(in.indirect, block_buf);
+        memcpy(entries, block_buf, sizeof(entries));
         if (first_free_block <= DIRECT_BLOCKS) {
             /* Free all indirect entries and the indirect block itself */
-            block_read(in.indirect, block_buf);
-            uint16_t *entries = (uint16_t *)block_buf;
             for (uint32_t i = 0; i < INDIRECT_ENTRIES; i++) {
                 if (entries[i] != 0) block_free(entries[i]);
             }
@@ -322,8 +324,6 @@ int file_truncate(uint32_t ino, uint32_t new_size) {
             in.indirect = 0;
         } else {
             /* Free only entries beyond first_free_block */
-            block_read(in.indirect, block_buf);
-            uint16_t *entries = (uint16_t *)block_buf;
             uint32_t start = first_free_block - DIRECT_BLOCKS;
             for (uint32_t i = start; i < INDIRECT_ENTRIES; i++) {
                 if (entries[i] != 0) {
@@ -331,6 +331,7 @@ int file_truncate(uint32_t ino, uint32_t new_size) {
                     entries[i] = 0;
                 }
             }
+            memcpy(block_buf, entries, sizeof(entries));
             block_write(in.indirect, block_buf);
         }
     }

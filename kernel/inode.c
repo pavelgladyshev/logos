@@ -80,6 +80,21 @@ int inode_free(uint32_t ino) {
         }
     }
 
+    /* Free the blocks the indirect block lists, then the indirect block.
+     * block_free() reads the bitmap into block_buf, so the list is copied out first. */
+    if (in.indirect != 0) {
+        static uint16_t entries[INDIRECT_ENTRIES];
+        if (block_read(in.indirect, block_buf) == FS_OK) {
+            memcpy(entries, block_buf, sizeof(entries));
+            for (uint32_t i = 0; i < INDIRECT_ENTRIES; i++) {
+                if (entries[i] != 0) {
+                    block_free(entries[i]);
+                }
+            }
+        }
+        block_free(in.indirect);
+    }
+
     /* Mark inode as free */
     memset(&in, 0, INODE_SIZE);
     in.type = FT_FREE;
