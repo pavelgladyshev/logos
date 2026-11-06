@@ -16,8 +16,9 @@ boot-rom.txt
 # Filesystem image
 block_storage.bin
 
-# fstool binary
+# fstool and logosfs binaries
 fstool/fstool
+fstool/logosfs
 
 # Logisim ROM data
 fs-rom
