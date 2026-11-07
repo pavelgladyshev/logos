@@ -195,14 +195,18 @@ $(FSTOOL_BIN): $(FSTOOL_OBJS)
 # libfuse3 and its headers on Linux). See README.md.
 LOGOSFS_BIN = fstool/logosfs
 LOGOSFS_OBJS = fstool/logosfs.native.o $(filter-out fstool/fstool.native.o,$(FSTOOL_OBJS))
+# libfuse3's flags from pkg-config or, without it, where macFUSE (/usr/local) and
+# Linux (/usr) put libfuse3; without the fuse3 directory, <fuse.h> is macFUSE's FUSE 2
 FUSE_PKG = PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$$PKG_CONFIG_PATH pkg-config fuse3
+FUSE_CFLAGS = $(shell $(FUSE_PKG) --cflags 2>/dev/null || echo -I/usr/local/include/fuse3 -I/usr/include/fuse3)
+FUSE_LIBS = $(shell $(FUSE_PKG) --libs 2>/dev/null || echo -L/usr/local/lib -lfuse3 -lpthread)
 
 fstool/logosfs.native.o: fstool/logosfs.c $(FSTOOL_HEADERS)
-	$(NATIVE_CC) -DNATIVE_BUILD -DFUSE_DARWIN_ENABLE_EXTENSIONS=0 $$($(FUSE_PKG) --cflags) \
+	$(NATIVE_CC) -DNATIVE_BUILD -DFUSE_DARWIN_ENABLE_EXTENSIONS=0 -D_FILE_OFFSET_BITS=64 $(FUSE_CFLAGS) \
 		-Wall -Wextra -O2 -iquote kernel -iquote fstool -c $< -o $@
 
 $(LOGOSFS_BIN): $(LOGOSFS_OBJS)
-	$(NATIVE_CC) -Wall -Wextra -O2 -o $(LOGOSFS_BIN) $(LOGOSFS_OBJS) $$($(FUSE_PKG) --libs)
+	$(NATIVE_CC) -Wall -Wextra -O2 -o $(LOGOSFS_BIN) $(LOGOSFS_OBJS) $(FUSE_LIBS)
 
 logosfs: $(LOGOSFS_BIN)
 
