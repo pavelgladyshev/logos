@@ -12,15 +12,37 @@ A bare-metal Unix-like operating system for RISC-V, designed to run on a simulat
 
 ## Quick Start
 
-### Prerequisites
+### Setting up
 
-- **Java** (for Logisim Evolution)
-- **RISC-V cross-compiler**: `riscv64-elf-gcc` and `riscv64-elf-ld`
-  - macOS (Homebrew): `brew install riscv-gnu-toolchain`
-  - Ubuntu Linux: `sudo apt install build-essential binutils-riscv64-unknown-elf gcc-riscv64-unknown-elf`
-- **Logisim Evolution UCD** v5.0.4+: [download from releases](https://github.com/pavelgladyshev/logisim-evolution-ucd/releases)
+LogOS builds and runs on macOS, on Linux (Ubuntu, Debian), and on Windows in Ubuntu on WSL 2.
+`setup.sh` installs what is missing (the RISC-V cross-compiler, Java and FUSE), fetches Logisim
+Evolution UCD, builds LogOS and checks that it boots:
 
-Update the `RISCV_TOOL_PREFIX` variable in the Makefile if your toolchain is in a different location (default: `/opt/homebrew/bin/riscv64-elf-`).
+```bash
+git clone -b main https://github.com/pavelgladyshev/logos.git
+cd logos
+./setup.sh
+```
+
+- **macOS**: install [Homebrew](https://brew.sh) first.
+- **Windows**: install Ubuntu on WSL 2 first: `wsl --install -d Ubuntu-24.04` in PowerShell, restart
+  Windows, and open Ubuntu from the Start menu, which asks for a Linux user name and password. Then
+  clone LogOS and run `setup.sh` in the Ubuntu window. Keep the clone in Ubuntu's own folders
+  (`~/logos`), not under `/mnt/c`; Windows programs find it at
+  `\\wsl.localhost\Ubuntu-24.04\home\<you>\logos`. Like a virtual machine, WSL 2 needs
+  virtualization switched on in the computer's firmware (BIOS/UEFI).
+
+`./setup.sh --check` only checks. When something is not right, the summary at the end says what:
+paste all of the output when you ask for help. What it installs, to do it by hand:
+
+- macOS: `brew install riscv64-elf-gcc`, and Java 21 or later (`brew install --cask temurin@21`).
+- Ubuntu, Debian, WSL: `sudo apt install build-essential git curl pkg-config fuse3 libfuse3-dev
+  gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf openjdk-21-jre`.
+- Logisim Evolution UCD 5.0.5 or later: `make logisim` fetches its jar from the
+  [releases](https://github.com/pavelgladyshev/logisim-evolution-ucd/releases).
+
+The Makefile finds the RISC-V compiler itself (Homebrew's or Ubuntu's); another one:
+`make RISCV_TOOL_PREFIX=/its/path/riscv64-elf-`.
 
 ### Build
 
@@ -34,29 +56,44 @@ This builds:
 - User programs (shell, ls, cat, cp, rm, mv, ln, ed, ps, kill, mkdir, rmdir, mknod, and demos)
 - `block_storage.bin` — Filesystem image containing the kernel and all user programs
 
+`make all` (or `make fs-image`) makes a fresh `block_storage.bin`: files added to the old one are gone.
+
 ### Run
 
-1. **First time**: Open `computer.circ` in Logisim Evolution UCD GUI, load `boot-rom.txt` into the ROM component and `block_storage.bin` into the block device, then save the circuit.
+```bash
+make run
+```
 
-2. **Run from terminal** (faster, no GUI overhead):
-   ```bash
-   java -jar logisim-evolution-ucd-5.0.4-all.jar computer.circ --tty raw
-   ```
-
-You should see the boot sequence followed by an interactive shell prompt:
+runs LogOS in Logisim's text mode (`java -jar logisim-evolution-ucd-5.0.5-all.jar computer.circ --tty raw`):
+the terminal is the computer's console, and the simulation runs much faster than in Logisim's
+window. Ctrl-C stops it. (`make run` makes `block_storage.bin` only when there is none.) You should
+see the bootloader load the kernel, and the shell's prompt:
 
 ```
 Bootloader starting...
 BOOT: Filesystem found
+BOOT: Found kernel at inode 4
 BOOT: Jumping to kernel at 0x100000
 
 Welcome to logOS 2.0 Blackrock!
+
 Mounting filesystem...
 Filesystem mounted.
-Starting shell
 
+Starting shell
+Type 'help' for available commands
+
+Welcome to logOS!
 /$ _
 ```
+
+`make gui` opens `computer.circ` in Logisim's window. On Windows the window comes through WSLg,
+with plainer graphics and more slowly; with Java for Windows installed and on the PATH (for
+example [Temurin 21](https://adoptium.net)), `make gui` uses it instead, for a native window and
+the FPGA board's USB.
+
+`computer.circ` holds the bootloader in its ROM. After changing the bootloader (`boot/`), load
+`boot-rom.txt` into the ROM in Logisim's window and save the circuit.
 
 ## Shell
 

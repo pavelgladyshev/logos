@@ -34,3 +34,7 @@ test.bin
 
 # Claude Code
 .claude/
+
+# Logisim Evolution UCD, fetched by make logisim / setup.sh
+logisim-evolution-ucd-*-all.jar
+logisim-evolution-ucd-*-all.jar.part
