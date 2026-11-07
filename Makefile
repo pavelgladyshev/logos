@@ -8,14 +8,29 @@
 #   user/    - User programs and runtime library
 #   fstool/  - Native filesystem tool for host
 #
-# To install required packages in Ubuntu Linux:
-#   sudo apt install build-essential binutils-riscv64-unknown-elf gcc-riscv64-unknown-elf
+# To set up a computer for LogOS (macOS, Ubuntu or Debian, Windows with WSL 2): ./setup.sh
+#
+#   make all        bootloader ROM image and a fresh disk image (block_storage.bin)
+#   make run        LogOS in Logisim's text mode, the fast way (Ctrl-C stops it)
+#   make gui        computer.circ in Logisim's window
 
 # ====================================
 # Common configuration
 # ====================================
 
-RISCV_TOOL_PREFIX = /opt/homebrew/bin/riscv64-elf-
+# The RISC-V cross-compiler, found by itself. Another one: make RISCV_TOOL_PREFIX=/its/path/riscv64-elf-
+ifndef RISCV_TOOL_PREFIX
+  ifneq ($(shell command -v /opt/homebrew/bin/riscv64-elf-gcc),)
+    # Homebrew on a Mac with Apple silicon
+    RISCV_TOOL_PREFIX := /opt/homebrew/bin/riscv64-elf-
+  else ifneq ($(shell command -v riscv64-elf-gcc),)
+    # Homebrew on an Intel Mac, Arch Linux
+    RISCV_TOOL_PREFIX := riscv64-elf-
+  else
+    # Ubuntu, Debian, Windows (Ubuntu on WSL): gcc-riscv64-unknown-elf
+    RISCV_TOOL_PREFIX := riscv64-unknown-elf-
+  endif
+endif
 RISCV_ISA = rv32im_zicsr
 RISCV_ABI = ilp32
 CFLAGS = -Wno-builtin-declaration-mismatch
@@ -332,6 +347,39 @@ qemu-gdb: compile-for-qemu
 all: boot-rom.txt fs-image
 
 # ====================================
+# LogOS in Logisim
+# ====================================
+
+# Logisim Evolution UCD, fetched from its releases (make logisim; setup.sh does it).
+# Another one: make run LOGISIM_JAR=/its/path/logisim-evolution-ucd-5.0.5-all.jar
+LOGISIM_VERSION = 5.0.5
+LOGISIM_JAR = logisim-evolution-ucd-$(LOGISIM_VERSION)-all.jar
+LOGISIM_URL = https://github.com/pavelgladyshev/logisim-evolution-ucd/releases/download/v$(LOGISIM_VERSION)/logisim-evolution-ucd-$(LOGISIM_VERSION)-all.jar
+
+logisim: $(LOGISIM_JAR)
+
+$(LOGISIM_JAR):
+	curl -fL --progress-bar -o $@.part $(LOGISIM_URL) && mv $@.part $@
+
+# Text mode: the TTY is this terminal, and the simulation runs much faster than in the window.
+# The disk image is made only if there is none (make fs-image makes a fresh one, without the
+# files you added since)
+run: $(LOGISIM_JAR) block_storage.bin
+	java -jar $(LOGISIM_JAR) computer.circ --tty raw
+
+block_storage.bin:
+	$(MAKE) fs-image
+
+# The window. On Windows (WSL), Java for Windows, when it is on the PATH, gives a native window
+# and the FPGA board's USB; without it, Linux's Java shows the window through WSLg
+gui: $(LOGISIM_JAR)
+	$(if $(shell command -v javaw.exe),javaw.exe,java) -jar $(LOGISIM_JAR) computer.circ
+
+# make print-VARIABLE: a variable's value (setup.sh asks for RISCV_TOOL_PREFIX and LOGISIM_JAR)
+print-%:
+	@echo '$($*)'
+
+# ====================================
 # Clean targets
 # ====================================
 
@@ -368,4 +416,4 @@ clean-all: clean clean-user clean-fstool
 	rm -f fs fs.map fs.sym fs.asm fs-rom fs-rom.txt
 
 .PHONY: all clean clean-all clean-boot clean-kernel clean-user clean-fstool \
-        fs-image fstool user-programs check-pie compile-for-qemu qemu qemu-gdb
+        fs-image fstool user-programs check-pie compile-for-qemu qemu qemu-gdb logisim run gui
