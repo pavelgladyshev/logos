@@ -23,6 +23,11 @@
 /* Magic number to identify our filesystem */
 #define FS_MAGIC           0x53465346  /* "FSFS" */
 
+/* Version of the disk layout in this file, kept in the superblock: 3 = Glendalough
+ * (59 direct blocks and one indirect block per inode). A change to the layout gets a
+ * new version, so that no kernel, fstool or logosfs of another layout mounts the disk. */
+#define FS_VERSION         2
+
 /* File types */
 #define FT_FREE            0         /* Inode is free */
 #define FT_FILE            1         /* Regular file */
@@ -40,6 +45,7 @@
 #define FS_ERR_IS_DIR      (-6)
 #define FS_ERR_NOT_EMPTY   (-7)
 #define FS_ERR_INVALID     (-8)
+#define FS_ERR_VERSION     (-9)      /* Disk of another file system version */
 
 /*
  * Superblock structure (stored in block 0)
@@ -56,7 +62,8 @@ struct superblock {
     uint32_t inode_start;      /* Starting block of inode table */
     uint32_t inode_blocks;     /* Number of blocks used by inode table */
     uint32_t data_start;       /* Starting block of data area */
-    uint8_t  reserved[BLOCK_SIZE - 40];  /* Padding to fill block */
+    uint32_t version;          /* Version of the disk layout (FS_VERSION) */
+    uint8_t  reserved[BLOCK_SIZE - 44];  /* Padding to fill block */
 };
 
 /*

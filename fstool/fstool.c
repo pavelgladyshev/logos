@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "fs.h"
+#include "fs_globals.h"
 #include "native_block.h"
 
 /*
@@ -128,14 +129,27 @@ static int cmd_format(const char *blockfile, const char *num_blocks_str) {
 /*
  * List directory command
  */
+/*
+ * Mount the file system, saying what is wrong if it cannot be
+ */
+static int mount_fs(void) {
+    int result = fs_mount();
+    if (result == FS_ERR_VERSION) {
+        fprintf(stderr, "Error: the file system is version %u; this fstool reads version %u\n"
+                        "       (make a new image with: make fs-image)\n", sb.version, FS_VERSION);
+    } else if (result != FS_OK) {
+        fprintf(stderr, "Error: Failed to mount filesystem (invalid or corrupted)\n");
+    }
+    return result;
+}
+
 static int cmd_ls(const char *blockfile, const char *path) {
     if (native_backing_store_open(blockfile) != 0) {
         fprintf(stderr, "Error: Failed to open block file '%s'\n", blockfile);
         return 1;
     }
 
-    if (fs_mount() != FS_OK) {
-        fprintf(stderr, "Error: Failed to mount filesystem (invalid or corrupted)\n");
+    if (mount_fs() != FS_OK) {
         native_backing_store_close();
         return 1;
     }
@@ -189,8 +203,7 @@ static int cmd_mkdir(const char *blockfile, const char *path) {
         return 1;
     }
 
-    if (fs_mount() != FS_OK) {
-        fprintf(stderr, "Error: Failed to mount filesystem\n");
+    if (mount_fs() != FS_OK) {
         native_backing_store_close();
         return 1;
     }
@@ -265,8 +278,7 @@ static int cmd_add(const char *blockfile, const char *path, const char *hostfile
         return 1;
     }
 
-    if (fs_mount() != FS_OK) {
-        fprintf(stderr, "Error: Failed to mount filesystem\n");
+    if (mount_fs() != FS_OK) {
         free(content);
         native_backing_store_close();
         return 1;

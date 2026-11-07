@@ -36,6 +36,7 @@ int fs_format(uint32_t total_blocks) {
     sb.inode_start = 1 + bitmap_blocks;
     sb.inode_blocks = inode_blocks;
     sb.data_start = data_start;
+    sb.version = FS_VERSION;
 
     /* Write superblock */
     if (block_write(0, &sb) != FS_OK) {
@@ -106,6 +107,11 @@ int fs_mount(void) {
     /* Verify magic number */
     if (sb.magic != FS_MAGIC) {
         return FS_ERR_INVALID;
+    }
+
+    /* Verify the layout version: a disk of another layout would be misread */
+    if (sb.version != FS_VERSION) {
+        return FS_ERR_VERSION;
     }
 
     return FS_OK;
