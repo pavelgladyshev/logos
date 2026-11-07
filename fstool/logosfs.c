@@ -423,7 +423,13 @@ int main(int argc, char *argv[])
         fprintf(stderr, "%s: cannot open %s\n", argv[0], argv[1]);
         return 1;
     }
-    if (fs_mount() != FS_OK) {
+    int r = fs_mount();
+    if (r == FS_ERR_VERSION) {
+        fprintf(stderr, "%s: %s is a LogOS disk of file system version %u; this logosfs reads "
+                        "version %u\n", argv[0], argv[1], sb.version, FS_VERSION);
+        return 1;
+    }
+    if (r != FS_OK) {
         fprintf(stderr, "%s: %s is not a LogOS disk image\n", argv[0], argv[1]);
         return 1;
     }
@@ -435,7 +441,7 @@ int main(int argc, char *argv[])
     for (int i = 2; i < argc; i++) fuse_opt_add_arg(&args, argv[i]);
     fuse_opt_add_arg(&args, "-s");
     fuse_opt_add_arg(&args, "-ofsname=logosfs");
-    int r = fuse_main(args.argc, args.argv, &lfs_ops, NULL);
+    r = fuse_main(args.argc, args.argv, &lfs_ops, NULL);
     fuse_opt_free_args(&args);
     native_backing_store_close();
     return r;

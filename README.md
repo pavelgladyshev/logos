@@ -124,10 +124,14 @@ Block Device (MMIO @ 0x200000)     Console (MMIO @ 0xFFFF000C)
 ### Filesystem
 
 Inode-based filesystem (1024 blocks x 512 bytes):
-- Block 0: Superblock (magic number, block/inode counts)
+- Block 0: Superblock (magic number, layout version, block/inode counts)
 - Blocks 1+: Block allocation bitmap
 - Subsequent blocks: Inode table (64 inodes x 128 bytes each)
 - Remaining blocks: Data
+
+The superblock's version (`FS_VERSION` in `kernel/fs_types.h`, 3 for this layout) changes
+whenever the layout does. The kernel, `fstool` and `logosfs` all refuse a disk of another
+version, so a disk image made by an older LogOS has to be made again: `make fs-image`.
 
 Managed on the host with `fstool`:
 ```bash

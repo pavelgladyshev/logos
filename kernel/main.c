@@ -14,6 +14,7 @@
  */
 
 #include "fs.h"
+#include "fs_globals.h"
 #include "console.h"
 #include "console_dev.h"
 #include "loader.h"
@@ -217,6 +218,11 @@ int main(void)
     vm_build_shared_l0();
 
     result = fs_mount();
+    if (result == FS_ERR_VERSION) {
+        printf("ERROR: the disk's file system is version %d; this kernel reads version %d\n",
+               (int)sb.version, FS_VERSION);
+        return result;
+    }
     if (result != FS_OK) {
         printf("ERROR: fs_mount failed (%d)\n", result);
         return result;

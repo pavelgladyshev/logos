@@ -93,10 +93,12 @@ Key modules organized by directory:
 | FUSE Driver | `logosfs.c` | Mounts a filesystem image on the host (macFUSE/FSKit, Linux FUSE) |
 
 **Filesystem Layout (1024 blocks × 512 bytes):**
-- Block 0: Superblock
-- Blocks 1-2: Block allocation bitmap
-- Blocks 3-18: Inode table (64 inodes × 128 bytes)
-- Blocks 19+: Data blocks
+- Block 0: Superblock (magic `FS_MAGIC`, layout version `FS_VERSION` = 3, counts); `fs_mount()`
+  refuses another version (`FS_ERR_VERSION`), so old images need `make fs-image`. Bump
+  `FS_VERSION` in `kernel/fs_types.h` whenever the on-disk layout changes
+- Block 1: Block allocation bitmap
+- Blocks 2-17: Inode table (64 inodes × 128 bytes)
+- Blocks 18-1023: Data blocks
 
 **Memory Layout (Logisim):**
 - 0x00000000-0x0000FFFF: ROM (64KB) — bootloader code (`boot_crt0.S` + `boot_main.c`)
