@@ -100,11 +100,13 @@ Key modules organized by directory:
 | Host Tool | `fstool.c`, `native_block.c` | Native utility to manage filesystem images |
 | FUSE Driver | `logosfs.c` | Mounts a filesystem image on the host (macFUSE/FSKit, Linux FUSE) |
 
-**Filesystem Layout (256 blocks × 512 bytes):**
-- Block 0: Superblock
-- Blocks 1+: Block allocation bitmap
-- Subsequent blocks: Inode table (32 inodes × 128 bytes)
-- Remaining: Data blocks
+**Filesystem Layout (512 blocks × 512 bytes):**
+- Block 0: Superblock (magic `FS_MAGIC`, layout version `FS_VERSION` = 1, counts); `fs_mount()`
+  refuses another version (`FS_ERR_VERSION`), so old images need `make fs-image`. Bump
+  `FS_VERSION` in `kernel/fs_types.h` whenever the on-disk layout changes
+- Block 1: Block allocation bitmap
+- Blocks 2-9: Inode table (32 inodes × 128 bytes)
+- Blocks 10-511: Data blocks
 
 **Memory Layout (Logisim):**
 - 0x00000000-0x0000FFFF: ROM (64KB) — bootloader code (`boot_crt0.S` + `boot_main.c`)
