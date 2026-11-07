@@ -44,6 +44,7 @@ environment value wins.
 ```bash
 ./fstool/logosfs <blockfile> <mountpoint> -o backend=fskit   # macOS (macFUSE 5, FSKit); Linux: no -o
 umount <mountpoint>                                          # Linux: fusermount3 -u <mountpoint>
+# Windows: in WSL 2 as on Linux; -o allow_other (user_allow_other in /etc/fuse.conf) for File Explorer
 ```
 
 The native builds (fstool, logosfs) compile the kernel's file system code itself, `kernel/block.c`
@@ -51,7 +52,8 @@ included; only `block_read()`/`block_write()` come from `fstool/native_block.c` 
 logosfs's FUSE operations call the same functions as the matching system calls (`fs_open`,
 `fs_open_parent`, `file_create`, `file_read`, `file_write`, `file_truncate`, `file_delete`,
 `fs_mkdir`, `fs_rmdir`, `fs_link`, `fs_rename`, `dir_list`); it runs single-threaded (`-s`)
-because the code shares one `block_buf`.
+because the code shares one `block_buf`. Linux's FUSE passes O_TRUNC to `open` instead of
+truncating first, so `lfs_open` truncates as `sys_open` does.
 
 ## Running
 

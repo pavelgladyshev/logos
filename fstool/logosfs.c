@@ -148,15 +148,21 @@ static int lfs_readdir(const char *path, void *buf, fuse_fill_dir_t fill, off_t 
     return 0;
 }
 
-/* open: like sys_open without O_CREAT (fs_open); O_TRUNC comes as a truncate */
+/* open: like sys_open without O_CREAT (fs_open, and file_truncate for O_TRUNC: Linux's FUSE leaves
+ * that to open) */
 static int lfs_open(const char *path, struct fuse_file_info *fi)
 {
     uint32_t ino;
     struct inode in;
     int r = lookup(path, &ino, &in);
     if (r != 0) return r;
+    if (in.type == FT_DIR) return -EISDIR;
     fi->direct_io = 1;                           /* each read and write comes here, as it is made */
-    return in.type == FT_DIR ? -EISDIR : 0;
+    if ((fi->flags & O_TRUNC) && in.type == FT_FILE) {
+        r = file_truncate(ino, 0);
+        if (r != FS_OK) return host_err(r);
+    }
+    return 0;
 }
 
 /* create: like sys_open with O_CREAT (fs_open_parent + file_create) */
