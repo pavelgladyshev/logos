@@ -12,15 +12,37 @@ A bare-metal Unix-like operating system for RISC-V, designed to run on a simulat
 
 ## Quick Start
 
-### Prerequisites
+### Setting up
 
-- **Java** (for Logisim Evolution)
-- **RISC-V cross-compiler**: `riscv64-elf-gcc` and `riscv64-elf-ld`
-  - macOS (Homebrew): `brew install riscv-gnu-toolchain`
-  - Ubuntu Linux: `sudo apt install build-essential binutils-riscv64-unknown-elf gcc-riscv64-unknown-elf`
-- **Logisim Evolution UCD** v5.0.4+: [download from releases](https://github.com/pavelgladyshev/logisim-evolution-ucd/releases)
+LogOS builds and runs on macOS, on Linux (Ubuntu, Debian), and on Windows in Ubuntu on WSL 2.
+`setup.sh` installs what is missing (the RISC-V cross-compiler, Java and FUSE), fetches Logisim
+Evolution UCD, builds LogOS and checks that it boots:
 
-Update the `RISCV_TOOL_PREFIX` variable in the Makefile if your toolchain is in a different location (default: `/opt/homebrew/bin/riscv64-elf-`).
+```bash
+git clone -b v3.0-glendalough https://github.com/pavelgladyshev/logos.git
+cd logos
+./setup.sh
+```
+
+- **macOS**: install [Homebrew](https://brew.sh) first.
+- **Windows**: install Ubuntu on WSL 2 first: `wsl --install -d Ubuntu-24.04` in PowerShell, restart
+  Windows, and open Ubuntu from the Start menu, which asks for a Linux user name and password. Then
+  clone LogOS and run `setup.sh` in the Ubuntu window. Keep the clone in Ubuntu's own folders
+  (`~/logos`), not under `/mnt/c`; Windows programs find it at
+  `\\wsl.localhost\Ubuntu-24.04\home\<you>\logos`. Like a virtual machine, WSL 2 needs
+  virtualization switched on in the computer's firmware (BIOS/UEFI).
+
+`./setup.sh --check` only checks. When something is not right, the summary at the end says what:
+paste all of the output when you ask for help. What it installs, to do it by hand:
+
+- macOS: `brew install riscv64-elf-gcc`, and Java 21 or later (`brew install --cask temurin@21`).
+- Ubuntu, Debian, WSL: `sudo apt install build-essential git curl pkg-config fuse3 libfuse3-dev
+  gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf openjdk-21-jre`.
+- Logisim Evolution UCD 5.0.4 or later: `make logisim` fetches its jar from the
+  [releases](https://github.com/pavelgladyshev/logisim-evolution-ucd/releases).
+
+The Makefile finds the RISC-V compiler itself (Homebrew's or Ubuntu's); another one:
+`make RISCV_TOOL_PREFIX=/its/path/riscv64-elf-`.
 
 ### Build
 
@@ -34,29 +56,36 @@ This builds:
 - User programs (shell, ls, cat, cp, rm, mv, ln, ed, ps, kill, mkdir, rmdir, mknod, and demos)
 - `block_storage.bin` — Filesystem image containing the kernel and all user programs
 
+`make all` (or `make fs-image`) makes a fresh `block_storage.bin`: files added to the old one are gone.
+
 ### Run
 
-1. **First time**: Open `computer.circ` in Logisim Evolution UCD GUI, load `boot-rom.txt` into the ROM component and `block_storage.bin` into the block device, then save the circuit.
+```bash
+make run
+```
 
-2. **Run from terminal** (faster, no GUI overhead):
-   ```bash
-   java -jar logisim-evolution-ucd-5.0.4-all.jar computer.circ --tty raw
-   ```
-
-You should see the boot sequence followed by an interactive shell prompt:
+runs LogOS in Logisim's text mode (`java -jar logisim-evolution-ucd-5.0.4-all.jar computer.circ --tty raw`):
+the terminal is the computer's console, and the simulation runs much faster than in Logisim's
+window. Ctrl-C stops it. (`make run` makes `block_storage.bin` only when there is none.) You should
+see the kernel start and the shell's prompt:
 
 ```
-Bootloader starting...
-BOOT: Filesystem found
-BOOT: Jumping to kernel at 0x100000
-
-Welcome to logOS 2.0 Blackrock!
-Mounting filesystem...
-Filesystem mounted.
+VM: page table pool at 0x158000 (32 pages)
+VM: shared L0 tables built (kern=0x158000, mmio=0x159000)
 Starting shell
+Type 'help' for available commands
 
+Welcome to logOS!
 /$ _
 ```
+
+`make gui` opens `computer.circ` in Logisim's window. On Windows the window comes through WSLg,
+with plainer graphics and more slowly; with Java for Windows installed and on the PATH (for
+example [Temurin 21](https://adoptium.net)), `make gui` uses it instead, for a native window and
+the FPGA board's USB.
+
+`computer.circ` holds the bootloader in its ROM. After changing the bootloader (`boot/`), load
+`boot-rom.txt` into the ROM in Logisim's window and save the circuit.
 
 ## Shell
 
@@ -157,11 +186,11 @@ It needs FUSE:
   in a terminal, and switch macFUSE on in System Settings → General → Login Items & Extensions →
   File System Extensions (ⓘ). No kernel extension is needed: logosfs runs through Apple's FSKit
   (`-o backend=fskit`).
-- **Linux** (Debian, Ubuntu): `sudo apt install fuse3 libfuse3-dev pkg-config`.
-- **Windows**: as on Linux, in Ubuntu on WSL 2 (`wsl --install -d Ubuntu-24.04` in PowerShell;
-  WSL 1 has no FUSE). Keep the clone in WSL's own folders (`~/logos`), not under `/mnt/c`. Ubuntu's
-  RISC-V packages are named differently from Homebrew's: `make RISCV_TOOL_PREFIX=riscv64-unknown-elf- fs-image`.
-  For File Explorer to see the mounted folder, see below.
+- **Linux** (Debian, Ubuntu): `sudo apt install fuse3 libfuse3-dev pkg-config` (`setup.sh` does).
+- **Windows**: as on Linux, in Ubuntu on WSL 2 (WSL 1 has no FUSE). For File Explorer to see the
+  mounted folder, see below.
+
+`setup.sh` builds logosfs when FUSE is there.
 
 ```bash
 make logosfs
@@ -185,7 +214,8 @@ there too: a full disk or a file too large shows as an I/O error when the file i
 On Windows, File Explorer finds the folder at `\\wsl.localhost\Ubuntu-24.04\home\<you>\logos\mnt`
 (the distribution's name as `wsl -l` shows it). It reaches WSL's files through WSL's file server,
 which runs as root, and FUSE shows a mounted folder to no other user, root included, unless it is
-mounted with `-o allow_other`; an ordinary user may ask for that once `/etc/fuse.conf` allows it:
+mounted with `-o allow_other`; an ordinary user may ask for that once `/etc/fuse.conf` allows it
+(`setup.sh` does that on WSL):
 
 ```bash
 sudo sed -i 's/^#user_allow_other/user_allow_other/' /etc/fuse.conf

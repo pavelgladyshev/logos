@@ -9,8 +9,13 @@ A bare-metal Unix-like OS for RISC-V, designed to run on a simulated RISC-V comp
 ## Build Commands
 
 ```bash
+./setup.sh                # Install what is missing (macOS/Homebrew, Ubuntu/Debian/WSL apt), fetch Logisim, build, boot-check
+./setup.sh --check        # The same checks, changing nothing
 make                      # Build bootloader ROM image (boot-rom.txt)
 make all                  # Build everything: boot-rom.txt, kernel.bin, user programs, filesystem image
+make run                  # LogOS in Logisim's text mode (--tty raw); makes block_storage.bin only if missing
+make gui                  # computer.circ in Logisim's window (on WSL: Java for Windows if on PATH, else WSLg)
+make logisim              # Fetch logisim-evolution-ucd-$(LOGISIM_VERSION)-all.jar from the releases
 make fstool               # Build native fstool utility for host system
 make logosfs              # Build fstool/logosfs, the FUSE driver (needs macFUSE or libfuse3)
 make fs-image             # Create filesystem image (block_storage.bin)
@@ -18,7 +23,12 @@ make user-programs        # Build all user programs
 make clean                # Clean object files and executables
 make clean-all            # Clean everything including user programs
 make check-pie            # Check user programs for PIE compatibility issues
+make print-VARIABLE       # Print a Makefile variable (setup.sh uses RISCV_TOOL_PREFIX, LOGISIM_JAR)
 ```
+
+`RISCV_TOOL_PREFIX` is detected: `/opt/homebrew/bin/riscv64-elf-` if present, else `riscv64-elf-` on the
+PATH (Intel Homebrew, Arch), else `riscv64-unknown-elf-` (Ubuntu/Debian/WSL packages); a command-line or
+environment value wins.
 
 ### fstool Usage
 
