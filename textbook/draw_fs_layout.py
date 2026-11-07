@@ -110,11 +110,12 @@ detail_sections = [
             ("free_blocks",   "uint32",    "count of free data blocks"),
             ("free_inodes",   "uint32",    "count of free inodes"),
             ("bitmap_start",  "uint32",    "1"),
-            ("bitmap_blocks", "uint32",    "2"),
-            ("inode_start",   "uint32",    "3"),
+            ("bitmap_blocks", "uint32",    "1"),
+            ("inode_start",   "uint32",    "2"),
             ("inode_blocks",  "uint32",    "16"),
-            ("data_start",    "uint32",    "19"),
-            ("reserved",      "byte[472]", "padding to fill 512-byte block"),
+            ("data_start",    "uint32",    "18"),
+            ("version",       "uint32",    "3: version of this layout (FS_VERSION)"),
+            ("reserved",      "byte[468]", "padding to fill 512-byte block"),
         ],
     },
     {
@@ -126,7 +127,8 @@ detail_sections = [
             ("major",       "uint8",      "device major number"),
             ("minor",       "uint8",      "device minor number"),
             ("link_count",  "uint8",      "number of hard links"),
-            ("blocks[60]",  "uint16[60]", "60 direct block pointers (max 30 KB)"),
+            ("blocks[59]",  "uint16[59]", "59 direct block pointers"),
+            ("indirect",    "uint16",     "block of 256 more pointers (files up to 157.5 KB)"),
         ],
     },
     {
@@ -164,16 +166,16 @@ bar_x = MARGIN_L
 bar_y = y
 
 draw_block_rect(d, bar_x,                     bar_y, SB_W, BAR_H, SUPERBLOCK, "Superblock", "Block 0")
-draw_block_rect(d, bar_x + SB_W,              bar_y, BM_W, BAR_H, BITMAP,     "Bitmap",     "Blocks 1\u20132")
-draw_block_rect(d, bar_x + SB_W + BM_W,       bar_y, IN_W, BAR_H, INODE,      "Inode Table","Blocks 3\u201318")
-draw_block_rect(d, bar_x + SB_W + BM_W + IN_W,bar_y, DA_W, BAR_H, DATA,       "Data Blocks","Blocks 19\u20131023")
+draw_block_rect(d, bar_x + SB_W,              bar_y, BM_W, BAR_H, BITMAP,     "Bitmap",     "Block 1")
+draw_block_rect(d, bar_x + SB_W + BM_W,       bar_y, IN_W, BAR_H, INODE,      "Inode Table","Blocks 2\u201317")
+draw_block_rect(d, bar_x + SB_W + BM_W + IN_W,bar_y, DA_W, BAR_H, DATA,       "Data Blocks","Blocks 18\u20131023")
 
 # --- Block numbers below the bar ---
 num_y = bar_y + BAR_H + 4
 d.text((bar_x + 1, num_y), "0", fill=GREY, font=F_MONO_S)
 d.text((bar_x + SB_W + 1, num_y), "1", fill=GREY, font=F_MONO_S)
-d.text((bar_x + SB_W + BM_W + 1, num_y), "3", fill=GREY, font=F_MONO_S)
-d.text((bar_x + SB_W + BM_W + IN_W + 1, num_y), "19", fill=GREY, font=F_MONO_S)
+d.text((bar_x + SB_W + BM_W + 1, num_y), "2", fill=GREY, font=F_MONO_S)
+d.text((bar_x + SB_W + BM_W + IN_W + 1, num_y), "18", fill=GREY, font=F_MONO_S)
 t1023 = "1023"
 d.text((bar_x + BAR_W - text_w(d, t1023, F_MONO_S) - 2, num_y), t1023, fill=GREY, font=F_MONO_S)
 
@@ -185,9 +187,9 @@ def sz_center(offset, width, txt):
     d.text((cx - tw // 2, sz_y), txt, fill=GREY, font=F_MONO_S)
 
 sz_center(0,                     SB_W, "512 B")
-sz_center(SB_W,                  BM_W, "1 KB")
+sz_center(SB_W,                  BM_W, "512 B")
 sz_center(SB_W + BM_W,          IN_W, "8 KB")
-sz_center(SB_W + BM_W + IN_W,   DA_W, "~502 KB")
+sz_center(SB_W + BM_W + IN_W,   DA_W, "~503 KB")
 
 y = sz_y + 18 + 8
 
