@@ -158,6 +158,10 @@ It needs FUSE:
   File System Extensions (ⓘ). No kernel extension is needed: logosfs runs through Apple's FSKit
   (`-o backend=fskit`).
 - **Linux** (Debian, Ubuntu): `sudo apt install fuse3 libfuse3-dev pkg-config`.
+- **Windows**: as on Linux, in Ubuntu on WSL 2 (`wsl --install -d Ubuntu-24.04` in PowerShell;
+  WSL 1 has no FUSE). Keep the clone in WSL's own folders (`~/logos`), not under `/mnt/c`. Ubuntu's
+  RISC-V packages are named differently from Homebrew's: `make RISCV_TOOL_PREFIX=riscv64-unknown-elf- fs-image`.
+  For File Explorer to see the mounted folder, see below.
 
 ```bash
 make logosfs
@@ -177,6 +181,20 @@ On macOS with FSKit, `ln` makes the hard link but reports an I/O error all the s
 FSKit backend wants a hard link to come back as the original's node, which FUSE's path-based
 interface does not do), and `ls -l` may show the first name's old link count. Writes are cached
 there too: a full disk or a file too large shows as an I/O error when the file is closed.
+
+On Windows, File Explorer finds the folder at `\\wsl.localhost\Ubuntu-24.04\home\<you>\logos\mnt`
+(the distribution's name as `wsl -l` shows it). It reaches WSL's files through WSL's file server,
+which runs as root, and FUSE shows a mounted folder to no other user, root included, unless it is
+mounted with `-o allow_other`; an ordinary user may ask for that once `/etc/fuse.conf` allows it:
+
+```bash
+sudo sed -i 's/^#user_allow_other/user_allow_other/' /etc/fuse.conf
+./fstool/logosfs block_storage.bin mnt -o allow_other
+```
+
+Windows puts LogOS's refusals in its own words: a file stops at 161,280 bytes with "A device
+attached to the system is not functioning", and a name longer than 27 characters has "incorrect
+syntax". Windows programs may end lines with CR LF, where LogOS's programs expect LF alone.
 
 ### System Calls
 
