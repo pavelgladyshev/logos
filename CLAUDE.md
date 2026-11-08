@@ -59,10 +59,10 @@ truncating first, so `lfs_open` truncates as `sys_open` does.
 
 ```bash
 # Logisim command-line mode (requires Java and Logisim Evolution UCD)
-java -jar ../git/logisim-evolution-ucd/build/libs/logisim-evolution-ucd-5.0.4-all.jar computer.circ -tty raw
+java -jar ../git/logisim-evolution-ucd/build/libs/logisim-evolution-ucd-5.0.5-all.jar computer.circ -tty raw
 
 # Logisim GUI mode
-java -jar ../git/logisim-evolution-ucd/build/libs/logisim-evolution-ucd-5.0.4-all.jar computer.circ
+java -jar ../git/logisim-evolution-ucd/build/libs/logisim-evolution-ucd-5.0.5-all.jar computer.circ
 ```
 
 Note: Before running Logisim without GUI, you must first load the bootloader ROM image (`boot-rom.txt`) into the ROM component and the filesystem image (`block_storage.bin`) into the block device via the GUI, then save the circuit.
