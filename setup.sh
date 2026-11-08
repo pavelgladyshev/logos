@@ -165,13 +165,15 @@ fi
 
 # ---------------------------------------------------------------------------------------------
 step "Building LogOS"
+build_dir=$(make -s print-BUILD_DIR 2>/dev/null)
+kernel="${build_dir:+$build_dir/}kernel.bin"         # 1.x builds in the top folder, not build/
 if $check_only; then
-    for f in boot-rom.txt build/kernel.bin fstool/fstool block_storage.bin; do
+    for f in boot-rom.txt "$kernel" fstool/fstool block_storage.bin; do
         if [ -f "$f" ]; then ok "$f"; else bad "$f is not built (./setup.sh builds it, or make all)"; fi
     done
 else
     mkdir -p build
-    if make -s boot-rom.txt build/kernel.bin user-programs fstool/fstool > build/setup-make.log 2>&1; then
+    if make -s boot-rom.txt "$kernel" user-programs fstool/fstool > build/setup-make.log 2>&1; then
         ok "bootloader, kernel, programs and fstool (the build's output: build/setup-make.log)"
     else
         tail -15 build/setup-make.log | sed 's/^/   | /'
@@ -234,7 +236,9 @@ if [ "$platform" = macos ]; then
 else
     [ -f /usr/include/fuse3/fuse.h ] && fuse=true
 fi
-if ! $fuse; then
+if [ ! -f fstool/logosfs.c ]; then
+    note "this LogOS has no logosfs"
+elif ! $fuse; then
     note "no FUSE (on macOS: macFUSE, see README.md, Mounting a disk image on your computer)"
 elif $check_only; then
     if [ -x fstool/logosfs ]; then ok "fstool/logosfs"; else note "fstool/logosfs is not built (make logosfs)"; fi
