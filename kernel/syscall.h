@@ -41,4 +41,7 @@ struct fd_entry {
  */
 int syscall_dispatch(trap_frame_t *tf);
 
+/* End the current process as if it called exit(status); see syscall.c. */
+int kill_current_process(trap_frame_t *tf, int status);
+
 #endif /* SYSCALL_H */

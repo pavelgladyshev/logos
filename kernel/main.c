@@ -48,10 +48,26 @@ void c_trap_handler(trap_frame_t *tf) {
     } else if (cause & MCAUSE_INTERRUPT) {
         printf("KERNEL: Unexpected interrupt, mcause=0x%x\n", cause);
         trap_ret(tf);
-    } else {
+    } else if (tf->mepc < PROC_MEM_START) {
+        /* An exception in the kernel itself is a kernel bug: stop. */
         printf("KERNEL: Exception! mcause=%d, mepc=0x%x\n", cause, tf->mepc);
         printf("KERNEL: Halting.\n");
         while (1) {}
+    } else {
+        /* An exception in a user program (illegal instruction, misaligned
+         * access, ebreak, ...): report it and end that program as if it had
+         * called exit(128 + mcause), so that the shell carries on. Not -1:
+         * spawn() returns a negative number when a program cannot start,
+         * and the shell would say "not found"; Unix shells report a program
+         * killed by a signal as 128 + the signal's number. */
+        int status = 128 + (int)cause;
+        printf("KERNEL: Exception! mcause=%d mepc=0x%x pid=%d - process killed, exit status %d\n",
+               cause, tf->mepc, proc_table[current_proc].pid, status);
+        if (kill_current_process(tf, status)) {
+            program_should_exit = 1;   /* it was the top-level shell */
+            return;
+        }
+        /* not reached: sys_exit resumed the parent */
     }
 }
 

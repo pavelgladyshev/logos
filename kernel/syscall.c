@@ -96,6 +96,19 @@ static int sys_exit(trap_frame_t *tf) {
 }
 
 /*
+ * kill_current_process - end the current process with `status`, exactly as
+ * if it had called exit(status): its parent, asleep in spawn(), gets the
+ * status (and $?).  Used when a user program causes an exception.  Like
+ * sys_exit, it does not return for a process with a parent; for the
+ * top-level shell it returns 1, and the caller lets the kernel start a new
+ * shell.
+ */
+int kill_current_process(trap_frame_t *tf, int status) {
+    tf->a0 = (uint32_t)status;
+    return sys_exit(tf);
+}
+
+/*
  * sys_read - Read from a file descriptor
  * a0 = fd, a1 = buf, a2 = len
  * Returns: number of bytes read, or negative error
