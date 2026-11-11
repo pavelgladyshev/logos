@@ -270,8 +270,8 @@ all: boot-rom.txt fs-image
 # ====================================
 
 # Logisim Evolution UCD, fetched from its releases (make logisim; setup.sh does it).
-# Another one: make run LOGISIM_JAR=/its/path/logisim-evolution-ucd-5.0.5-all.jar
-LOGISIM_VERSION = 5.0.5
+# Another one: make run LOGISIM_JAR=/its/path/logisim-evolution-ucd-5.0.6-all.jar
+LOGISIM_VERSION = 5.0.6
 LOGISIM_JAR = logisim-evolution-ucd-$(LOGISIM_VERSION)-all.jar
 LOGISIM_URL = https://github.com/pavelgladyshev/logisim-evolution-ucd/releases/download/v$(LOGISIM_VERSION)/logisim-evolution-ucd-$(LOGISIM_VERSION)-all.jar
 

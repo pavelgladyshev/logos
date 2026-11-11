@@ -59,7 +59,7 @@ truncating first, so `lfs_open` truncates as `sys_open` does.
 
 ```bash
 # Logisim (requires Java and Logisim Evolution)
-java -jar ~/logisim-evolution-ucd-5.0.5-all.jar computer.circ -t tty
+java -jar ~/logisim-evolution-ucd-5.0.6-all.jar computer.circ -t tty
 
 # QEMU (alternative - compiles for RV64)
 make qemu                 # Run in QEMU with serial console
