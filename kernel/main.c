@@ -9,13 +9,13 @@
  *   3. s_mode_main() (S-mode): shell restart loop with SV32 paging
  *
  * Trap handling:
- *   - M-mode: timer interrupts only (m_trap.S forwards as STIP)
+ *   - M-mode: timer interrupts only (m_trap.S forwards as SSIP)
  *   - S-mode: ecall from U-mode, supervisor timer, page faults
  */
 
 /* The name and the version of this logOS, printed when the kernel starts */
 #define LOGOS_NAME    "Glendalough"
-#define LOGOS_VERSION "3.0.1"
+#define LOGOS_VERSION "3.0.2"
 
 #include "fs.h"
 #include "fs_globals.h"

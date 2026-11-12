@@ -4,7 +4,7 @@
  *
  * This file contains:
  * 1. A minimal M-mode trap handler that forwards timer interrupts
- *    to S-mode by injecting STIP (supervisor timer interrupt pending).
+ *    to S-mode by setting SSIP (supervisor software interrupt pending).
  * 2. CSR accessor functions for S-mode registers (satp, stvec, etc.)
  * 3. Privilege mode transition helpers.
  */
@@ -17,7 +17,7 @@
  *
  * Installed in mtvec permanently. When a machine timer interrupt fires:
  *   1. Advance mtimecmp to schedule the next tick
- *   2. Set MIP.STIP (bit 5) to inject supervisor timer interrupt
+ *   2. Set MIP.SSIP (bit 1): S-mode takes a supervisor software interrupt
  *   3. mret back to S-mode / U-mode
  *
  * All other traps reaching M-mode are unexpected (everything should be

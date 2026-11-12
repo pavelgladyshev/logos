@@ -271,6 +271,43 @@ static void test_fork_exhaustion(void) {
     }
 }
 
+/* Test 11: kill closes the victim's pipe ends, so that a reader sees end of file */
+static void test_kill_closes_pipes(void) {
+    int fds[2];
+    int pid, n;
+    char c;
+
+    printf("\n--- Test 11: kill closes pipe ends ---\n");
+
+    if (pipe(fds) < 0) { fail("kill closes pipe ends", "pipe failed"); return; }
+
+    pid = fork();
+    if (pid < 0) { fail("kill closes pipe ends", "fork failed"); return; }
+
+    if (pid == 0) {
+        /* Child: keep the write end open and loop forever (will be killed) */
+        close(fds[0]);
+        for (;;) { }
+    }
+
+    /* Parent: after this close the child holds the only write end */
+    close(fds[1]);
+    if (kill(pid) < 0) {
+        fail("kill closes pipe ends", "kill returned error");
+        wait();
+        close(fds[0]);
+        return;
+    }
+
+    /* End of file, not a sleep that never ends: the write end went with the child */
+    n = read(fds[0], &c, 1);
+    wait();
+    close(fds[0]);
+
+    if (n == 0) pass("kill closes pipe ends");
+    else fail("kill closes pipe ends", "read did not return end of file");
+}
+
 int main(void) {
     printf("=== Process Management Tests ===\n");
 
@@ -284,6 +321,7 @@ int main(void) {
     test_env_isolation();
     test_exit_code();
     test_fork_exhaustion();
+    test_kill_closes_pipes();
 
     print_test_results();
     return tests_failed;

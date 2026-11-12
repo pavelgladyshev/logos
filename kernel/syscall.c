@@ -704,7 +704,7 @@ static int32_t sys_spawn(trap_frame_t *tf) {
  * sys_fork - Create a copy of the current process
  *
  * Copies the full 32KB memory slot, trap frame, env, and fds.
- * Adjusts child's registers (sp, mepc, ra, s0) by the memory delta.
+ * The child runs at the same virtual addresses, so no register is adjusted.
  *
  * Returns: child PID to parent, 0 to child, -1 on error
  */
@@ -1517,6 +1517,29 @@ static int32_t sys_kill(trap_frame_t *tf) {
         if (proc_table[i].state != PROC_FREE && proc_table[i].pid == target_pid) {
             if (i == current_proc) return -1;
             if (proc_table[i].parent == -1) return -1;
+
+            /* As in sys_exit: the victim's children lose their parent (those
+             * that have finished are freed), and its pipe ends are closed, so
+             * that processes at the other ends see end of file or EPIPE. */
+            {
+                int j;
+                for (j = 0; j < MAX_PROCS; j++) {
+                    if (proc_table[j].parent == i) {
+                        if (proc_table[j].state == PROC_ZOMBIE) {
+                            proc_free(j);
+                        } else {
+                            proc_table[j].parent = -1;  /* orphan */
+                        }
+                    }
+                }
+                for (j = 0; j < MAX_FD; j++) {
+                    if (proc_table[i].fds[j].in_use && proc_table[i].fds[j].type == FT_PIPE) {
+                        pipe_close_fd((int)proc_table[i].fds[j].inode,
+                                      (int)proc_table[i].fds[j].minor);
+                        proc_table[i].fds[j].in_use = 0;
+                    }
+                }
+            }
 
             proc_table[i].state = PROC_ZOMBIE;
             proc_table[i].exit_code = -1;
