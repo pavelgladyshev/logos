@@ -6,9 +6,9 @@ A bare-metal Unix-like operating system for RISC-V, designed to run on a simulat
 
 | Version | Branch | Target | Key Features |
 |---------|--------|--------|--------------|
-| **1.0 Belfield** | [`v1.x`](../../tree/v1.x) | RV32IM M-mode (no timer required) | Single-tasking, spawn-based process model, filesystem, shell, basic utilities |
-| **2.0 Blackrock** | [`main`](../../tree/main) | RV32IM_Zicsr M-mode + timer | Preemptive multitasking, fork/exec/wait, pipes, multi-stage pipelines, I/O redirection |
-| *3.0 Glendalough* | *planned* | RV32 + SV32 MMU | Virtual memory, user/supervisor separation |
+| **Belfield** 1.x | [`1.x-belfield`](../../tree/1.x-belfield) | RV32IM M-mode (no timer required) | Single-tasking, spawn-based process model, filesystem, shell, basic utilities |
+| **Blackrock** 2.x | [`2.x-blackrock`](../../tree/2.x-blackrock) | RV32IM_Zicsr M-mode + timer | Preemptive multitasking, fork/exec/wait, pipes, multi-stage pipelines, I/O redirection, shared memory, semaphores, shell scripts |
+| **Glendalough** 3.x | [`3.x-glendalough`](../../tree/3.x-glendalough) | RV32 + SV32 MMU | Virtual memory, user/supervisor separation |
 
 ## Quick Start
 
@@ -19,7 +19,7 @@ LogOS builds and runs on macOS, on Linux (Ubuntu, Debian), and on Windows in Ubu
 Evolution UCD, builds LogOS and checks that it boots:
 
 ```bash
-git clone -b main https://github.com/pavelgladyshev/logos.git
+git clone -b 2.x-blackrock https://github.com/pavelgladyshev/logos.git
 cd logos
 ./setup.sh
 ```
@@ -75,7 +75,8 @@ BOOT: Filesystem found
 BOOT: Found kernel at inode 4
 BOOT: Jumping to kernel at 0x100000
 
-Welcome to logOS 2.0 Blackrock!
+logOS Blackrock
+Version 2.1.0
 
 Mounting filesystem...
 Filesystem mounted.

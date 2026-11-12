@@ -6,6 +6,10 @@
  * Each program runs in its own 32KB memory slot with a per-process trap frame.
  */
 
+/* The name and the version of this logOS, printed when the kernel starts */
+#define LOGOS_NAME    "Blackrock"
+#define LOGOS_VERSION "2.1.0"
+
 #include "fs.h"
 #include "fs_globals.h"
 #include "console.h"
@@ -94,7 +98,7 @@ int main(void)
     struct program_info info;
     int last_exit_code = 0;
 
-    printf("Welcome to logOS 2.0 Blackrock!\n\n");
+    printf("logOS " LOGOS_NAME "\nVersion " LOGOS_VERSION "\n\n");
 
     /* Initialize subsystems */
     console_dev_init();
