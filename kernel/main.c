@@ -6,6 +6,10 @@
  * Each program runs in its own 64KB memory slot with a per-process trap frame.
  */
 
+/* The name and the version of this logOS, printed when the kernel starts */
+#define LOGOS_NAME    "Belfield"
+#define LOGOS_VERSION "1.0.1"
+
 #include "fs.h"
 #include "fs_globals.h"
 #include "console.h"
@@ -87,7 +91,7 @@ int main(void)
     struct program_info info;
     int last_exit_code = 0;
 
-    printf("Welcome to logOS Belfield 1.0!\n\n");
+    printf("logOS " LOGOS_NAME "\nVersion " LOGOS_VERSION "\n\n");
 
     /* Initialize subsystems */
     console_dev_init();
