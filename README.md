@@ -80,7 +80,7 @@ BOOT: Found kernel at inode 4
 BOOT: Jumping to kernel at 0x100000
 
 logOS Belfield
-Version 1.0.1
+Version 1.0.2
 
 Mounting filesystem...
 Filesystem mounted.

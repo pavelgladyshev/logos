@@ -8,7 +8,7 @@
 
 /* The name and the version of this logOS, printed when the kernel starts */
 #define LOGOS_NAME    "Belfield"
-#define LOGOS_VERSION "1.0.1"
+#define LOGOS_VERSION "1.0.2"
 
 #include "fs.h"
 #include "fs_globals.h"
