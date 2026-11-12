@@ -71,7 +71,7 @@ see the kernel start and the shell's prompt:
 
 ```
 logOS Glendalough
-Version 3.0.0
+Version 3.0.1
 
 VM: page table pool at 0x158000 (32 pages)
 VM: shared L0 tables built (kern=0x158000, mmio=0x159000)
