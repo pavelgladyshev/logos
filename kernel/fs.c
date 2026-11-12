@@ -78,7 +78,7 @@ int fs_format(uint32_t total_blocks) {
     struct inode root;
     memset(&root, 0, INODE_SIZE);
     root.type = FT_DIR;
-    root.size = 0;
+    root.link_count = 1;
 
     if (inode_write(ROOT_INODE, &root) != FS_OK) {
         return FS_ERR_IO;
