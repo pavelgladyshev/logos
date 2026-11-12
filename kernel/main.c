@@ -8,7 +8,7 @@
 
 /* The name and the version of this logOS, printed when the kernel starts */
 #define LOGOS_NAME    "Blackrock"
-#define LOGOS_VERSION "2.1.0"
+#define LOGOS_VERSION "2.1.1"
 
 #include "fs.h"
 #include "fs_globals.h"
