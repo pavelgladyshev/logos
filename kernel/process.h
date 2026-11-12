@@ -25,7 +25,7 @@
 #define SLEEP_CHILD   1   /* spawn(): waiting for specific child to exit */
 #define SLEEP_WAIT    2   /* wait(): waiting for any child to exit */
 #define SLEEP_TIMER   3   /* future: sleep(n) — waiting for timer */
-#define SLEEP_IO      4   /* future: blocking read — waiting for input */
+#define SLEEP_IO      4   /* read from an empty pipe, or write to a full one */
 #define SLEEP_SEM     5   /* Blocked on semaphore wait */
 
 /* Process table limits */

@@ -6,7 +6,7 @@
  * dup refcounting, zero-length operations, writes larger than the buffer,
  * and atomic writes of at most PIPE_BUF bytes.
  *
- * PIPE_BUF = 512 (kernel PIPE_BUF_SIZE), MAX_PIPES = 8, MAX_FD = 16
+ * PIPE_BUF = 512 (kernel PIPE_BUF_SIZE), MAX_PIPES = 8, MAX_FD = 8
  */
 
 #include "libc.h"

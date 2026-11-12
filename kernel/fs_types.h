@@ -23,8 +23,8 @@
 /* Magic number to identify our filesystem */
 #define FS_MAGIC           0x53465346  /* "FSFS" */
 
-/* Version of the disk layout in this file, kept in the superblock: 3 = Glendalough
- * (59 direct blocks and one indirect block per inode). A change to the layout gets a
+/* Version of the disk layout in this file, kept in the superblock: 2 = Blackrock
+ * (64 inodes, 60 direct blocks per inode, no indirect block). A change to the layout gets a
  * new version, so that no kernel, fstool or logosfs of another layout mounts the disk. */
 #define FS_VERSION         2
 

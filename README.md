@@ -76,7 +76,7 @@ BOOT: Found kernel at inode 4
 BOOT: Jumping to kernel at 0x100000
 
 logOS Blackrock
-Version 2.1.1
+Version 2.1.2
 
 Mounting filesystem...
 Filesystem mounted.
