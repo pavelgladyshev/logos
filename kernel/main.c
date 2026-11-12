@@ -13,6 +13,10 @@
  *   - S-mode: ecall from U-mode, supervisor timer, page faults
  */
 
+/* The name and the version of this logOS, printed when the kernel starts */
+#define LOGOS_NAME    "Glendalough"
+#define LOGOS_VERSION "3.0.0"
+
 #include "fs.h"
 #include "fs_globals.h"
 #include "console.h"
@@ -213,6 +217,9 @@ int main(void)
 
     /* Initialize subsystems (still in M-mode) */
     console_dev_init();
+
+    printf("logOS " LOGOS_NAME "\nVersion " LOGOS_VERSION "\n\n");
+
     proc_init();
     vm_init();
     vm_build_shared_l0();
