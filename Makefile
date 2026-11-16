@@ -271,6 +271,22 @@ block_storage.bin:
 gui: $(LOGISIM_JAR)
 	$(if $(shell command -v javaw.exe),javaw.exe,java) -jar $(LOGISIM_JAR) computer.circ
 
+# The debugger. Logisim's RV32IM CPU has a GDB server. make debug starts LogOS in text mode with
+# the server switched on, in a copy of the circuit, and the CPU waits for a debugger; make gdb,
+# in another terminal, connects a RISC-V gdb to it with the kernel's symbols (then: break main,
+# continue). Another gdb: make gdb GDB=/its/path/riscv64-elf-gdb
+GDB_PORT = 3333
+GDB ?= $(or $(shell command -v gdb-multiarch),$(shell command -v riscv64-elf-gdb),$(shell command -v riscv64-unknown-elf-gdb),gdb)
+
+computer-gdb.circ: computer.circ
+	sed 's|\(name="RV32IM CPU">\)|\1<a name="gdbServerRunning" val="true"/><a name="tcpPort" val="$(GDB_PORT)"/>|' computer.circ > $@
+
+debug: $(LOGISIM_JAR) block_storage.bin computer-gdb.circ
+	java -jar $(LOGISIM_JAR) computer-gdb.circ --tty raw
+
+gdb: $(BUILD_DIR)/kernel-debug.elf
+	$(GDB) -q -ex 'set architecture riscv:rv32' -ex 'target remote localhost:$(GDB_PORT)' $(BUILD_DIR)/kernel-debug.elf
+
 # make print-VARIABLE: a variable's value (setup.sh asks for RISCV_TOOL_PREFIX and LOGISIM_JAR)
 print-%:
 	@echo '$($*)'
@@ -298,4 +314,4 @@ clean-all: clean clean-user clean-fstool
 	rm -f boot-rom boot-rom.txt block_storage.bin
 
 .PHONY: all clean clean-all clean-boot clean-kernel clean-user clean-fstool logosfs \
-        fs-image fstool user-programs check-pie logisim run gui
+        fs-image fstool user-programs check-pie logisim run gui debug gdb
