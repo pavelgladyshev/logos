@@ -15,7 +15,7 @@
 
 /* The name and the version of this logOS, printed when the kernel starts */
 #define LOGOS_NAME    "Glendalough"
-#define LOGOS_VERSION "3.0.2"
+#define LOGOS_VERSION "3.0.3"
 
 #include "fs.h"
 #include "fs_globals.h"
