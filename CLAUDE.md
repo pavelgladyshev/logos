@@ -61,9 +61,9 @@ truncating first, so `lfs_open` truncates as `sys_open` does.
 # Logisim (requires Java and Logisim Evolution)
 java -jar ~/logisim-evolution-ucd-5.0.7-all.jar computer.circ -t tty
 
-# QEMU (alternative - compiles for RV64)
-make qemu                 # Run in QEMU with serial console
-make qemu-gdb             # Run in QEMU, wait for GDB at localhost:1234
+# Debugging: Logisim's CPU has a GDB server
+make debug                # LogOS in text mode, CPU waiting for gdb on port 3333
+make gdb                  # in another terminal: gdb with the kernel's symbols
 ```
 
 Note: Before running Logisim without GUI, you must first load the bootloader ROM image (`boot-rom.txt`) into the ROM component and the filesystem image (`block_storage.bin`) into the block device via the GUI, then save the circuit.
