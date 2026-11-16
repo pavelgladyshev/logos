@@ -43,3 +43,4 @@ logisim-evolution-ucd-*-all.jar.part
 
 # setup.sh's build log (build/setup-make.log)
 build/
+computer-gdb.circ

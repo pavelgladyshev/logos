@@ -99,6 +99,23 @@ the FPGA board's USB.
 `computer.circ` holds the bootloader in its ROM. After changing the bootloader (`boot/`), load
 `boot-rom.txt` into the ROM in Logisim's window and save the circuit.
 
+### Debugging with gdb
+
+The RV32IM CPU of Logisim Evolution UCD has a GDB server (its attribute *Start GDB Server?*; the
+port is 3333). `make debug` starts LogOS in text mode with the server switched on, in a copy of the
+circuit (`computer-gdb.circ`), and the CPU waits. In another terminal, `make gdb` connects a RISC-V
+gdb (`gdb-multiarch` on Ubuntu, `riscv64-elf-gdb` from Homebrew) with the kernel's symbols:
+
+```
+(gdb) break main
+(gdb) continue
+Breakpoint 1, main () at kernel/main.c
+(gdb) stepi
+(gdb) info registers
+```
+
+The server listens on every network interface of your computer, so use it on a network you trust.
+
 ## Shell
 
 ```bash

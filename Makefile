@@ -35,7 +35,7 @@ endif
 RISCV_ISA = rv32im_zicsr
 RISCV_ABI = ilp32
 CFLAGS = -Wno-builtin-declaration-mismatch
-QEMU_APP = qemu-system-riscv64
+GDB_PORT = 3333
 NATIVE_CC = gcc
 
 # Common RISC-V compilation flags
@@ -338,30 +338,6 @@ fs-image: $(FSTOOL_BIN) kernel.bin hello.elf spawn_demo.elf shell.elf ls.elf mkd
 	@echo "Filesystem image created."
 
 # ====================================
-# QEMU support (compiles kernel for RV64)
-# ====================================
-
-QEMU_EXECUTABLE = fs
-
-QEMU_KERNEL_OBJS = $(KERNEL_OBJS)
-
-compile-for-qemu: RISCV_ISA=rv64g
-compile-for-qemu: RISCV_ABI=lp64
-compile-for-qemu: CFLAGS+=-DQEMU20180
-compile-for-qemu: clean-kernel $(QEMU_EXECUTABLE)
-
-$(QEMU_EXECUTABLE): $(QEMU_KERNEL_OBJS)
-	$(RISCV_TOOL_PREFIX)ld -nostdlib -o $(QEMU_EXECUTABLE) -Map $(QEMU_EXECUTABLE).map -T kernel/qemu.lds $(QEMU_KERNEL_OBJS)
-	$(RISCV_TOOL_PREFIX)objdump -S $(QEMU_EXECUTABLE) > $(QEMU_EXECUTABLE).asm
-	$(RISCV_TOOL_PREFIX)nm $(QEMU_EXECUTABLE) > $(QEMU_EXECUTABLE).sym
-
-qemu: compile-for-qemu
-	$(QEMU_APP) -machine virt -kernel $(QEMU_EXECUTABLE) -bios none -serial stdio
-
-qemu-gdb: compile-for-qemu
-	$(QEMU_APP) -s -S -machine virt -kernel $(QEMU_EXECUTABLE) -bios none -serial stdio
-
-# ====================================
 # Build everything
 # ====================================
 
@@ -395,6 +371,21 @@ block_storage.bin:
 # and the FPGA board's USB; without it, Linux's Java shows the window through WSLg
 gui: $(LOGISIM_JAR)
 	$(if $(shell command -v javaw.exe),javaw.exe,java) -jar $(LOGISIM_JAR) computer.circ
+
+# The debugger. Logisim's RV32IM CPU has a GDB server. make debug starts LogOS in text mode with
+# the server switched on, in a copy of the circuit, and the CPU waits for a debugger; make gdb,
+# in another terminal, connects a RISC-V gdb to it with the kernel's symbols (then: break main,
+# continue). Another gdb: make gdb GDB=/its/path/riscv64-elf-gdb
+GDB ?= $(or $(shell command -v gdb-multiarch),$(shell command -v riscv64-elf-gdb),$(shell command -v riscv64-unknown-elf-gdb),gdb)
+
+computer-gdb.circ: computer.circ
+	sed 's|\(name="RV32IM CPU">\)|\1<a name="gdbServerRunning" val="true"/><a name="tcpPort" val="$(GDB_PORT)"/>|' computer.circ > $@
+
+debug: $(LOGISIM_JAR) block_storage.bin computer-gdb.circ
+	java -jar $(LOGISIM_JAR) computer-gdb.circ --tty raw
+
+gdb: kernel-debug.elf
+	$(GDB) -q -ex 'set architecture riscv:rv32' -ex 'target remote localhost:$(GDB_PORT)' kernel-debug.elf
 
 # make print-VARIABLE: a variable's value (setup.sh asks for RISCV_TOOL_PREFIX and LOGISIM_JAR)
 print-%:
@@ -437,4 +428,4 @@ clean-all: clean clean-user clean-fstool
 	rm -f fs fs.map fs.sym fs.asm fs-rom fs-rom.txt
 
 .PHONY: all clean clean-all clean-boot clean-kernel clean-user clean-fstool logosfs \
-        fs-image fstool user-programs check-pie compile-for-qemu qemu qemu-gdb logisim run gui
+        fs-image fstool user-programs check-pie logisim run gui debug gdb
