@@ -314,27 +314,32 @@ logosfs: $(LOGOSFS_BIN)
 # Filesystem image
 # ====================================
 
+# The disk that fs-image writes. It can be the microSD card in a Tang Nano 20K that runs the
+# sdcard-bridge bitstream of the book's supplement: make fs-image DISK=/dev/ttyUSB1
+# (on macOS /dev/cu.usbserial-...1)
+DISK ?= block_storage.bin
+
 fs-image: $(FSTOOL_BIN) kernel.bin hello.elf spawn_demo.elf shell.elf ls.elf mkdir.elf rmdir.elf mknod.elf env_demo.elf cat.elf rm.elf mv.elf ln.elf cp.elf ed.elf
-	$(FSTOOL_BIN) format block_storage.bin 512
-	$(FSTOOL_BIN) mkdir block_storage.bin /boot
-	$(FSTOOL_BIN) mkdir block_storage.bin /bin
-	$(FSTOOL_BIN) mkdir block_storage.bin /etc
-	$(FSTOOL_BIN) add block_storage.bin /boot/kernel kernel.bin
-	$(FSTOOL_BIN) add block_storage.bin /bin/hello hello.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/spawn_demo spawn_demo.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/sh shell.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/ls ls.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/mkdir mkdir.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/rmdir rmdir.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/mknod mknod.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/env_demo env_demo.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/cat cat.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/rm rm.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/mv mv.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/ln ln.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/cp cp.elf
-	$(FSTOOL_BIN) add block_storage.bin /bin/ed ed.elf
-	$(FSTOOL_BIN) add block_storage.bin /etc/hello.txt hello.txt
+	$(FSTOOL_BIN) format $(DISK) 512
+	$(FSTOOL_BIN) mkdir $(DISK) /boot
+	$(FSTOOL_BIN) mkdir $(DISK) /bin
+	$(FSTOOL_BIN) mkdir $(DISK) /etc
+	$(FSTOOL_BIN) add $(DISK) /boot/kernel kernel.bin
+	$(FSTOOL_BIN) add $(DISK) /bin/hello hello.elf
+	$(FSTOOL_BIN) add $(DISK) /bin/spawn_demo spawn_demo.elf
+	$(FSTOOL_BIN) add $(DISK) /bin/sh shell.elf
+	$(FSTOOL_BIN) add $(DISK) /bin/ls ls.elf
+	$(FSTOOL_BIN) add $(DISK) /bin/mkdir mkdir.elf
+	$(FSTOOL_BIN) add $(DISK) /bin/rmdir rmdir.elf
+	$(FSTOOL_BIN) add $(DISK) /bin/mknod mknod.elf
+	$(FSTOOL_BIN) add $(DISK) /bin/env_demo env_demo.elf
+	$(FSTOOL_BIN) add $(DISK) /bin/cat cat.elf
+	$(FSTOOL_BIN) add $(DISK) /bin/rm rm.elf
+	$(FSTOOL_BIN) add $(DISK) /bin/mv mv.elf
+	$(FSTOOL_BIN) add $(DISK) /bin/ln ln.elf
+	$(FSTOOL_BIN) add $(DISK) /bin/cp cp.elf
+	$(FSTOOL_BIN) add $(DISK) /bin/ed ed.elf
+	$(FSTOOL_BIN) add $(DISK) /etc/hello.txt hello.txt
 	@echo "Filesystem image created."
 
 # ====================================
