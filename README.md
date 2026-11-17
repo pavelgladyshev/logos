@@ -246,6 +246,24 @@ Windows puts LogOS's refusals in its own words: a file stops at 161,280 bytes wi
 attached to the system is not functioning", and a name longer than 27 characters has "incorrect
 syntax". Windows programs may end lines with CR LF, where LogOS's programs expect LF alone.
 
+### The microSD card of a Tang Nano 20K
+
+LogOS on a Tang Nano 20K FPGA board keeps its disk on the board's microSD card, block n of the
+image being block n of the card. With the `sdcard-bridge` bitstream of the book's supplement
+([bare-metal-os-supplement](https://github.com/pavelgladyshev/bare-metal-os-supplement)) loaded
+into the board, the board's USB serial port reaches the card, and `fstool` and `logosfs` take the
+serial port wherever they take a disk image (`/dev/ttyUSB1` on Linux, `/dev/cu.usbserial-...1`
+on macOS):
+
+```bash
+make fs-image DISK=/dev/ttyUSB1          # a fresh disk, written to the card (about 2 minutes)
+./fstool/fstool ls /dev/ttyUSB1 /bin
+./fstool/logosfs /dev/ttyUSB1 mnt        # the card as a folder
+```
+
+The serial port moves about 10 KB a second, so a large copy takes a while. Unmount, then load the
+computer back into the board, and LogOS boots from the card.
+
 ### System Calls
 
 Programs use `ecall` with the syscall number in `a7` and arguments in `a0`-`a5`:

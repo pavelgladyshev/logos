@@ -218,22 +218,27 @@ logosfs: $(LOGOSFS_BIN)
 # Map program names to filesystem paths (shell.elf -> /bin/sh, others -> /bin/<name>)
 SHELL_FS_NAME = sh
 
+# The disk that fs-image writes. It can be the microSD card in a Tang Nano 20K that runs the
+# sdcard-bridge bitstream of the book's supplement: make fs-image DISK=/dev/ttyUSB1
+# (on macOS /dev/cu.usbserial-...1)
+DISK ?= block_storage.bin
+
 fs-image: $(FSTOOL_BIN) $(BUILD_DIR)/kernel.bin $(USER_ELFS) | $(BUILD_DIR)
-	$(FSTOOL_BIN) format block_storage.bin 1024
-	$(FSTOOL_BIN) mkdir block_storage.bin /boot
-	$(FSTOOL_BIN) mkdir block_storage.bin /bin
-	$(FSTOOL_BIN) mkdir block_storage.bin /etc
-	$(FSTOOL_BIN) add block_storage.bin /boot/kernel $(BUILD_DIR)/kernel.bin
+	$(FSTOOL_BIN) format $(DISK) 1024
+	$(FSTOOL_BIN) mkdir $(DISK) /boot
+	$(FSTOOL_BIN) mkdir $(DISK) /bin
+	$(FSTOOL_BIN) mkdir $(DISK) /etc
+	$(FSTOOL_BIN) add $(DISK) /boot/kernel $(BUILD_DIR)/kernel.bin
 	@for prog in $(USER_PROGS); do \
 		if [ "$$prog" = "shell" ]; then \
-			$(FSTOOL_BIN) add block_storage.bin /bin/$(SHELL_FS_NAME) $(BUILD_DIR)/$$prog.elf; \
+			$(FSTOOL_BIN) add $(DISK) /bin/$(SHELL_FS_NAME) $(BUILD_DIR)/$$prog.elf; \
 		else \
-			$(FSTOOL_BIN) add block_storage.bin /bin/$$prog $(BUILD_DIR)/$$prog.elf; \
+			$(FSTOOL_BIN) add $(DISK) /bin/$$prog $(BUILD_DIR)/$$prog.elf; \
 		fi; \
 	done
-	$(FSTOOL_BIN) add block_storage.bin /etc/hello.txt hello.txt
-	$(FSTOOL_BIN) add block_storage.bin /etc/rc rc
-	$(FSTOOL_BIN) add block_storage.bin /etc/test.sh test.sh
+	$(FSTOOL_BIN) add $(DISK) /etc/hello.txt hello.txt
+	$(FSTOOL_BIN) add $(DISK) /etc/rc rc
+	$(FSTOOL_BIN) add $(DISK) /etc/test.sh test.sh
 	@echo "Filesystem image created."
 
 # ====================================
