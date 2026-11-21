@@ -108,9 +108,16 @@ Breakpoint 1, main () at kernel/main.c
 The server listens on every network interface of your computer, so use it on a network you trust.
 
 On a Tang Nano 20K the same attribute gives the CPU on the FPGA a RISC-V debug module on the
-board's JTAG port (Logisim Evolution UCD 5.0.9 and later): OpenOCD reaches it through the board's
-USB cable, and gdb connects to OpenOCD as above, on port 3334
-(`support/logos/tests/debug/tangnano20k.cfg` in Logisim Evolution UCD's repository).
+board's JTAG port (Logisim Evolution UCD 5.0.9 and later). With it set before the download,
+`make openocd` connects OpenOCD (`sudo apt install openocd`, `brew install open-ocd`) to the board
+through its USB cable, with `fpga/tangnano20k.cfg`; leave it running. `make fpga-gdb`, in another
+terminal, then connects gdb as above, on port 3334, since Logisim's own server has 3333. On Linux
+the configuration also runs `fpga/bl616_latency.py`, which keeps the board's console quick while
+OpenOCD runs.
+Start `make openocd` once LogOS has booted, and before you open the console. Right after the
+download the CPU has not started yet, and OpenOCD gives up on it (run it again). As it starts,
+OpenOCD can put a few stray characters into the console's input, and the first time after the board
+was plugged in it has stopped the board's serial port until the board was unplugged.
 
 ## Shell
 
