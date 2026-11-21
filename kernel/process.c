@@ -10,12 +10,8 @@
 #include "shm.h"          /* for shm_detach */
 #include "sem.h"          /* for sem_close */
 #include "string.h"
+#include "timer.h"
 #include "trap.h"
-
-/* Timer MMIO registers */
-#define TIMER_MTIME    ((volatile uint32_t *)0x200bff8)
-#define TIMER_MTIMECMP ((volatile uint32_t *)0x2004000)
-#define TIME_SLICE     800
 
 /* Global process table */
 struct process proc_table[MAX_PROCS];
@@ -201,10 +197,11 @@ void proc_set_env_int(int slot, const char *name, int value) {
 }
 
 void timer_init(void) {
+    /* Set first timer alarm. mtimecmp is not defined after reset, so it is
+     * set, both words, before the timer interrupt is enabled */
+    timer_arm();
     /* Enable timer (bit 7) and external (bit 11) interrupt sources */
     set_mie(0x880);
-    /* Set first timer alarm */
-    *TIMER_MTIMECMP = *TIMER_MTIME + TIME_SLICE;
     /* Set MPIE so interrupts become enabled on mret */
     set_mstatus_bit(0x80);
 }
