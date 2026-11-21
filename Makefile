@@ -15,6 +15,7 @@
 #   make run        LogOS in Logisim's text mode, the fast way (Ctrl-C stops it)
 #   make gui        computer.circ in Logisim's window
 #   make logosfs    the FUSE driver that mounts block_storage.bin on your computer
+#   make openocd    OpenOCD for the CPU on a Tang Nano 20K (Debug Enable); then make fpga-gdb
 
 # ====================================
 # Common configuration
@@ -290,6 +291,18 @@ debug: $(LOGISIM_JAR) block_storage.bin computer-gdb.circ
 gdb: $(BUILD_DIR)/kernel-debug.elf
 	$(GDB) -q -ex 'set architecture riscv:rv32' -ex 'target remote localhost:$(GDB_PORT)' $(BUILD_DIR)/kernel-debug.elf
 
+# LogOS on a Tang Nano 20K: with the CPU's attribute Debug Enable set before the download, the CPU
+# on the FPGA has a debug module on the board's JTAG port. make openocd connects OpenOCD to it
+# through the board's USB cable (fpga/tangnano20k.cfg; leave it running), and make fpga-gdb, in
+# another terminal, connects gdb to OpenOCD, on port 3334: Logisim's own GDB server has 3333.
+FPGA_GDB_PORT = 3334
+
+openocd:
+	openocd -f fpga/tangnano20k.cfg
+
+fpga-gdb:
+	$(MAKE) gdb GDB_PORT=$(FPGA_GDB_PORT)
+
 # make print-VARIABLE: a variable's value (setup.sh asks for RISCV_TOOL_PREFIX and LOGISIM_JAR)
 print-%:
 	@echo '$($*)'
@@ -317,4 +330,4 @@ clean-all: clean clean-user clean-fstool
 	rm -f boot-rom boot-rom.txt block_storage.bin
 
 .PHONY: all clean clean-all clean-boot clean-kernel clean-user clean-fstool logosfs \
-        fs-image fstool user-programs check-pie logisim run gui debug gdb
+        fs-image fstool user-programs check-pie logisim run gui debug gdb openocd fpga-gdb
