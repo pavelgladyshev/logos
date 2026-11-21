@@ -64,6 +64,8 @@ java -jar ~/logisim-evolution-ucd-5.0.9-all.jar computer.circ -t tty
 # Debugging: Logisim's CPU has a GDB server
 make debug                # LogOS in text mode, CPU waiting for gdb on port 3333
 make gdb                  # in another terminal: gdb with the kernel's symbols
+make openocd              # Tang Nano 20K, CPU with Debug Enable: OpenOCD (fpga/tangnano20k.cfg)
+make fpga-gdb             # in another terminal: gdb to OpenOCD, port 3334
 ```
 
 Note: Before running Logisim without GUI, you must first load the bootloader ROM image (`boot-rom.txt`) into the ROM component and the filesystem image (`block_storage.bin`) into the block device via the GUI, then save the circuit.
