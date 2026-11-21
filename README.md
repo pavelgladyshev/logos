@@ -38,7 +38,7 @@ paste all of the output when you ask for help. What it installs, to do it by han
 - macOS: `brew install riscv64-elf-gcc`, and Java 21 or later (`brew install --cask temurin@21`).
 - Ubuntu, Debian, WSL: `sudo apt install build-essential git curl pkg-config fuse3 libfuse3-dev
   gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf openjdk-21-jre`.
-- Logisim Evolution UCD 5.0.8 or later: `make logisim` fetches its jar from the
+- Logisim Evolution UCD 5.0.9 or later: `make logisim` fetches its jar from the
   [releases](https://github.com/pavelgladyshev/logisim-evolution-ucd/releases).
 
 The Makefile finds the RISC-V compiler itself (Homebrew's or Ubuntu's); another one:
@@ -64,7 +64,7 @@ This builds:
 make run
 ```
 
-runs LogOS in Logisim's text mode (`java -jar logisim-evolution-ucd-5.0.8-all.jar computer.circ --tty raw`):
+runs LogOS in Logisim's text mode (`java -jar logisim-evolution-ucd-5.0.9-all.jar computer.circ --tty raw`):
 the terminal is the computer's console, and the simulation runs much faster than in Logisim's
 window. Ctrl-C stops it. (`make run` makes `block_storage.bin` only when there is none.) You should
 see the bootloader load the kernel, and the shell's prompt:
@@ -98,7 +98,7 @@ the FPGA board's USB.
 
 ### Debugging with gdb
 
-The RV32IM CPU of Logisim Evolution UCD has a GDB server (its attribute *Start GDB Server?*; the
+The RV32IM CPU of Logisim Evolution UCD has a GDB server (its attribute *Debug Enable*; the
 port is 3333). `make debug` starts LogOS in text mode with the server switched on, in a copy of the
 circuit (`computer-gdb.circ`), and the CPU waits. In another terminal, `make gdb` connects a RISC-V
 gdb (`gdb-multiarch` on Ubuntu, `riscv64-elf-gdb` from Homebrew) with the kernel's symbols:
@@ -112,6 +112,11 @@ Breakpoint 1, main () at kernel/main.c
 ```
 
 The server listens on every network interface of your computer, so use it on a network you trust.
+
+On a Tang Nano 20K the same attribute gives the CPU on the FPGA a RISC-V debug module on the
+board's JTAG port (Logisim Evolution UCD 5.0.9 and later): OpenOCD reaches it through the board's
+USB cable, and gdb connects to OpenOCD as above, on port 3334
+(`support/logos/tests/debug/tangnano20k.cfg` in Logisim Evolution UCD's repository).
 
 ## Shell
 
