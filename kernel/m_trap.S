@@ -16,7 +16,8 @@
  * ============================
  *
  * Installed in mtvec permanently. When a machine timer interrupt fires:
- *   1. Advance mtimecmp to schedule the next tick
+ *   1. Set mtimecmp to mtime + TIME_SLICE to schedule the next tick
+ *      (both have 64 bits, and are read and written a word at a time)
  *   2. Set MIP.SSIP (bit 1): S-mode takes a supervisor software interrupt
  *   3. mret back to S-mode / U-mode
  *
@@ -32,33 +33,58 @@
     .globl m_trap_handler
     .align 4
 m_trap_handler:
-    /* Save t0 and t1 — we use both in the timer handler.
-     * t0 is saved in mscratch, t1 in m_trap_save_t1.
+    /* Save t0, t1 and t2 — we use all three in the timer handler.
+     * t0 is saved in mscratch, t1 and t2 in m_trap_save.
      *
-     * t1 must NOT be pushed on the interrupted stack: if the timer fires
+     * They must NOT be pushed on the interrupted stack: if the timer fires
      * while a user program runs, sp holds a user *virtual* address
      * (around 0x407Fxx), but M-mode accesses are not translated, so the
      * push and pop would go to that *physical* address, where there is no
-     * RAM, and t1 would come back as garbage.  The kernel is linked at its
-     * physical address, so a static save slot works in M-mode.  Only one
+     * RAM, and they would come back as garbage.  The kernel is linked at its
+     * physical address, so static save slots work in M-mode.  Only one
      * hart, and M-mode interrupts are off inside this handler, so one slot
-     * is enough. */
+     * each is enough. */
     csrw mscratch, t0
-    la   t0, m_trap_save_t1
+    la   t0, m_trap_save
     sw   t1, 0(t0)
+    sw   t2, 4(t0)
 
     /* Check if this is a timer interrupt (mcause = 0x80000007) */
     csrr t0, mcause
     li   t1, 0x80000007       /* Machine timer interrupt */
     bne  t0, t1, m_trap_unexpected
 
-    /* Timer interrupt: advance mtimecmp */
-    li   t0, TIMER_MTIME
-    lw   t1, 0(t0)            /* t1 = current mtime */
-    li   t0, TIME_SLICE
-    add  t1, t1, t0           /* t1 = mtime + TIME_SLICE */
+    /* Timer interrupt: set mtimecmp to mtime + TIME_SLICE. Both registers
+     * have 64 bits, in two words each: the low word at the register's
+     * address and the high word 4 above it (timer.h says more).
+     *
+     * mtimecmp is set with the three stores that the RISC-V privileged
+     * specification gives for a 32-bit RISC-V. This is the first: all ones
+     * into the low word, so that no value on the way is below both the old
+     * value and the new one, and the timer requests no interrupt in between. */
     li   t0, TIMER_MTIMECMP
-    sw   t1, 0(t0)            /* mtimecmp = mtime + TIME_SLICE */
+    li   t1, -1
+    sw   t1, 0(t0)            /* mtimecmp, low word: all ones for now */
+
+    /* Read mtime. It counts on while its two words are read, and the low
+     * word may carry into the high word in between: read the high word, the
+     * low word and the high word again, until the high word has not changed. */
+1:  li   t0, TIMER_MTIME
+    lw   t1, 4(t0)            /* t1 = mtime, high word */
+    lw   t2, 0(t0)            /* t2 = mtime, low word */
+    lw   t0, 4(t0)            /* the high word again */
+    bne  t0, t1, 1b           /* it changed: read again */
+
+    /* Add TIME_SLICE, with the carry from the low word into the high word */
+    li   t0, TIME_SLICE
+    add  t2, t2, t0           /* low word + TIME_SLICE */
+    sltu t0, t2, t0           /* t0 = 1 if the sum is below TIME_SLICE: a carry */
+    add  t1, t1, t0           /* t1:t2 = mtime + TIME_SLICE */
+
+    /* The second and the third store: the high word, then the low word */
+    li   t0, TIMER_MTIMECMP
+    sw   t1, 4(t0)            /* mtimecmp, high word */
+    sw   t2, 0(t0)            /* mtimecmp, low word: the new value */
 
     /* Inject supervisor software interrupt to forward timer tick to S-mode.
      * We use SSIP (bit 1) instead of STIP (bit 5) because STIP is read-only
@@ -67,8 +93,9 @@ m_trap_handler:
     li   t0, (1 << 1)         /* SSIP bit */
     csrs mip, t0              /* Set SSIP — S-mode will see this as software interrupt */
 
-    /* Restore t1 and t0, then return */
-    la   t0, m_trap_save_t1
+    /* Restore t2, t1 and t0, then return */
+    la   t0, m_trap_save
+    lw   t2, 4(t0)
     lw   t1, 0(t0)
     csrr t0, mscratch
     mret
@@ -76,7 +103,8 @@ m_trap_handler:
 m_trap_unexpected:
     /* Unexpected trap in M-mode — should not happen if delegation is correct */
     /* Halt (infinite loop) */
-    la   t0, m_trap_save_t1
+    la   t0, m_trap_save
+    lw   t2, 4(t0)
     lw   t1, 0(t0)
     csrr t0, mscratch         /* restore t0 before halting */
 1:  j    1b
@@ -279,8 +307,9 @@ drop_to_smode:
  * via clear_ssip() before returning.
  */
 
-/* M-mode save slot for t1 (see m_trap_handler). */
+/* M-mode save slots for t1 and t2 (see m_trap_handler). */
     .data
     .align 2
-m_trap_save_t1:
+m_trap_save:
+    .word 0
     .word 0

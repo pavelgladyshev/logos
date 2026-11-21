@@ -244,11 +244,12 @@ int main(void)
     /* 2. Install M-mode timer forwarder (stays in mtvec permanently) */
     set_mtvec((uint32_t)m_trap_handler);
 
-    /* 3. Enable M-mode timer interrupt */
-    set_mie(0x80);   /* MIE.MTIE (bit 7) */
+    /* 3. Arm the first timer tick. mtimecmp is not defined after reset, so
+     * it is set, both words, before the timer interrupt is enabled */
+    timer_arm();
 
-    /* 4. Arm the first timer tick */
-    *TIMER_MTIMECMP = *TIMER_MTIME + TIME_SLICE;
+    /* 4. Enable M-mode timer interrupt */
+    set_mie(0x80);   /* MIE.MTIE (bit 7) */
 
     /* 5. Enable supervisor timer interrupt in SIE */
     write_sie(0x22);  /* SIE.SSIE (bit 1) + SIE.STIE (bit 5) */
