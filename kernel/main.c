@@ -15,7 +15,7 @@
 
 /* The name and the version of this logOS, printed when the kernel starts */
 #define LOGOS_NAME    "Glendalough"
-#define LOGOS_VERSION "3.0.3"
+#define LOGOS_VERSION "3.1.0"
 
 #include "fs.h"
 #include "fs_globals.h"
@@ -31,9 +31,6 @@
 /* Kernel trap stack - used when handling traps from user programs */
 #define TRAP_STACK_SIZE 4096
 static uint8_t trap_stack[TRAP_STACK_SIZE] __attribute__((aligned(16)));
-
-/* Flag to indicate the current top-level program has exited */
-volatile int program_should_exit = 0;
 
 /* Assembly function to save kernel context and jump to user program */
 extern int run_user_program(trap_frame_t *tf);
@@ -60,7 +57,7 @@ extern void m_trap_handler(void);
  * Timer forwarding uses SSIP (bit 1) because STIP is read-only from S-mode. */
 #define MIDELEG_BITS  ((1<<1)|(1<<5)|(1<<9))
 
-/* Root page table for kernel identity mapping (shared by all processes in Phase 2) */
+/* Root page table for kernel identity mapping */
 static uint32_t kernel_pt_root;
 
 /*
@@ -68,14 +65,13 @@ static uint32_t kernel_pt_root;
  * Dispatches system calls and handles other traps.
  */
 void c_trap_handler(trap_frame_t *tf) {
-    uint32_t cause = get_mcause();  /* Actually reads scause (wrapper renamed) */
+    uint32_t cause = get_cause();
 
     if (cause == SCAUSE_ECALL_FROM_U) {
         /* System call from user mode */
         if (syscall_dispatch(tf)) {
             /* sys_exit was called by a process with no parent.
              * Return to run_user_program via restore_kernel_context. */
-            program_should_exit = 1;
             return;
         }
         /* Normal syscall - return to user program */
@@ -85,12 +81,12 @@ void c_trap_handler(trap_frame_t *tf) {
          * Clear SSIP (writable from S-mode) to prevent re-entry after sret. */
         clear_ssip();
         proc_table[current_proc].state = PROC_READY;
-        schedule();  /* never returns */
+        schedule();  /* never returns: this process is ready */
     } else if (cause == SCAUSE_S_TIMER_INT) {
         /* Direct supervisor timer — clear and reschedule */
         clear_stip();
         proc_table[current_proc].state = PROC_READY;
-        schedule();  /* never returns */
+        schedule();  /* never returns: this process is ready */
     } else if (cause & SCAUSE_INTERRUPT) {
         printf("KERNEL: Unexpected S-mode interrupt, scause=0x%x\n", cause);
         trap_ret(tf);
@@ -103,7 +99,7 @@ void c_trap_handler(trap_frame_t *tf) {
         uint32_t sstatus;
         __asm__ volatile ("csrr %0, 0x100" : "=r"(sstatus));   /* sstatus */
         if (sstatus & (1u << 8)) {
-            printf("KERNEL: Exception in the kernel! scause=%d, sepc=0x%x\n", cause, tf->mepc);
+            printf("KERNEL: Exception in the kernel! scause=%d, sepc=0x%x\n", cause, tf->epc);
             printf("KERNEL: stval=0x%x\n", read_stval());
             printf("KERNEL: Halting.\n");
             while (1) {}
@@ -113,15 +109,14 @@ void c_trap_handler(trap_frame_t *tf) {
             cause == SCAUSE_STORE_PAGE_FAULT) {
             printf("KERNEL: Page fault! scause=%d va=0x%x pid=%d (%s) sepc=0x%x\n",
                    cause, read_stval(), proc_table[current_proc].pid,
-                   proc_table[current_proc].name, tf->mepc);
+                   proc_table[current_proc].name, tf->epc);
         } else {
             printf("KERNEL: Exception! scause=%d stval=0x%x pid=%d (%s) sepc=0x%x\n",
                    cause, read_stval(), proc_table[current_proc].pid,
-                   proc_table[current_proc].name, tf->mepc);
+                   proc_table[current_proc].name, tf->epc);
         }
         if (kill_current_process(tf, -1)) {
-            program_should_exit = 1;   /* it was the top-level shell */
-            return;
+            return;   /* it was the top-level shell */
         }
         /* not reached: sys_exit switched to another process */
     }
@@ -183,9 +178,14 @@ static void s_mode_main(void) {
 
         /* Set up process state */
         setup_trap_frame(slot);
-        setup_process_vm(slot);
+        if (setup_process_vm(slot) < 0) {
+            printf("ERROR: No page tables for /bin/sh\n");
+            printf("Halting.\n");
+            proc_free(slot);
+            while (1) {}
+        }
         /* Use virtual addresses — entry point is offset from slot base, mapped at USER_VA_BASE */
-        p->tf.mepc = USER_VA_BASE + (info.entry_point - p->mem_base);
+        p->tf.epc = USER_VA_BASE + (info.entry_point - p->mem_base);
         p->tf.ra = 0;
         p->tf.sp = USER_STACK_TOP;
         p->tf.a0 = 0;  /* argc = 0 */
@@ -196,10 +196,10 @@ static void s_mode_main(void) {
 
         /* Activate this process's page tables and prepare for U-mode */
         current_proc = slot;
-        program_should_exit = 0;
         write_satp(p->satp);
         sfence_vma();
         clear_spp();   /* SPP=0 so sret drops to U-mode */
+        /* LIMITATIONS.md K16: on for the program only; the kernel never enables interrupts */
         set_spie();    /* SPIE=1 so sret enables interrupts */
         set_trap_handler(trap_handler, &p->tf);
         run_user_program(&p->tf);
@@ -216,6 +216,7 @@ int main(void)
     int result;
 
     /* Initialize subsystems (still in M-mode) */
+    /* LIMITATIONS.md B4: the console is the only driver */
     console_dev_init();
 
     printf("logOS " LOGOS_NAME "\nVersion " LOGOS_VERSION "\n\n");
@@ -254,6 +255,7 @@ int main(void)
     /* 5. Enable supervisor timer interrupt in SIE */
     write_sie(0x22);  /* SIE.SSIE (bit 1) + SIE.STIE (bit 5) */
 
+    /* LIMITATIONS.md G6: this root table is never freed */
     /* 6. Build kernel identity-mapped page tables */
     kernel_pt_root = pt_alloc();
     build_kernel_mappings(kernel_pt_root);
@@ -266,7 +268,6 @@ int main(void)
      * Set MPP=Supervisor and MPIE=0: mret copies MPIE into MIE, so M-mode
      * interrupts stay off; it does not touch SIE, which is still 0.
      * s_mode_main will enable interrupts after setting up the trap handler. */
-    /* Drop to S-mode */
     {
         /* Clear MPP, set to Supervisor (01). Keep MPIE=0. */
         uint32_t mstatus;

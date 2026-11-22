@@ -14,7 +14,9 @@ A bare-metal Unix-like OS for RISC-V, designed to run on a simulated RISC-V comp
 make                      # Build bootloader ROM image (boot-rom.txt)
 make all                  # Build everything: boot-rom.txt, kernel.bin, user programs, filesystem image
 make run                  # LogOS in Logisim's text mode (--tty raw); makes block_storage.bin only if missing
-make gui                  # computer.circ in Logisim's window (on WSL: Java for Windows if on PATH, else WSLg)
+make gui                  # computer-rom.circ in Logisim's window (on WSL: Java for Windows if on PATH, else WSLg)
+make check-rom            # computer.circ's ROM is empty, computer-rom.circ's holds boot-rom.txt (mkcircuit.py writes it)
+make test                 # Fresh disk, then test_fork.sh (needs expect): fork, pipes, the ten test programs, test.sh
 make logisim              # Fetch logisim-evolution-ucd-$(LOGISIM_VERSION)-all.jar from the releases
 make fstool               # Build native fstool utility for host system
 make logosfs              # Build fstool/logosfs, the FUSE driver (needs macFUSE or libfuse3)
@@ -59,10 +61,10 @@ truncating first, so `lfs_open` truncates as `sys_open` does.
 
 ```bash
 # Logisim command-line mode (requires Java and Logisim Evolution UCD)
-java -jar ../git/logisim-evolution-ucd/build/libs/logisim-evolution-ucd-5.0.9-all.jar computer.circ -tty raw
+java -jar ~/logisim-evolution-ucd-5.0.10-all.jar computer-rom.circ --tty raw
 
 # Logisim GUI mode
-java -jar ../git/logisim-evolution-ucd/build/libs/logisim-evolution-ucd-5.0.9-all.jar computer.circ
+java -jar ~/logisim-evolution-ucd-5.0.10-all.jar computer-rom.circ
 
 # Debugging: Logisim's CPU has a GDB server
 make debug                # LogOS in text mode, CPU waiting for gdb on port 3333
@@ -71,7 +73,7 @@ make openocd              # Tang Nano 20K, CPU with Debug Enable: OpenOCD (fpga/
 make fpga-gdb             # in another terminal: gdb to OpenOCD, port 3334
 ```
 
-Note: Before running Logisim without GUI, you must first load the bootloader ROM image (`boot-rom.txt`) into the ROM component and the filesystem image (`block_storage.bin`) into the block device via the GUI, then save the circuit.
+Note: the ROM of `computer.circ` is empty. `make run`, `gui` and `debug` run a copy, `computer-rom.circ` (`computer-gdb.circ` for `make debug`), with `boot-rom.txt` in its ROM (`mkcircuit.py` writes it); the Block Storage reads `block_storage.bin` beside the circuit.
 
 ## Architecture
 
@@ -92,13 +94,13 @@ Key modules organized by directory:
 | Filesystem | `fs.c/h` | Format, mount, open paths (absolute), superblock access |
 | Device | `device.c/h`, `console_dev.c/h` | Character device driver framework, console driver |
 | Trap Handling | `trap.S`, `m_trap.S`, `trap.h` | S-mode trap handler, M-mode timer/IPI forwarder, context save/restore |
-| Virtual Memory | `vm.c/h` | SV32 page tables, copyin/copyout/copyinstr, user VA translation |
+| Virtual Memory | `vm.c/h` | SV32 page tables, copyinstr, user VA translation |
 | Process Mgmt | `process.c/h` | Process table, slot allocation, per-process state |
 | Pipes | `pipe.c/h` | Kernel-buffered IPC pipes with reference counting |
 | Shared Memory | `shm.c/h` | Fixed-size (4KB) shared memory segments, key-based API |
 | Semaphores | `sem.c/h` | Counting semaphores with ecall-retry blocking |
 | System Calls | `syscall.c/h`, `syscall_nr.h` | Syscall dispatch, per-process file descriptors |
-| ELF Loader | `loader.c/h`, `loader_asm.S`, `elf.h` | Load ELF programs at arbitrary addresses |
+| ELF Loader | `loader.c/h`, `elf.h` | Load ELF programs at arbitrary addresses |
 | Kernel Entry | `crt0.S`, `kernel.lds` | Kernel entry point (in RAM), kernel linker script |
 | Kernel Main | `main.c` | Kernel initialization and shell restart loop |
 | **User** (`user/`) | | |
@@ -121,20 +123,20 @@ Key modules organized by directory:
 **Memory Layout (Logisim):**
 - 0x00000000-0x0000FFFF: ROM (64KB) — bootloader code (`boot_crt0.S` + `boot_main.c`)
 - 0x00100000-0x0010FFFF: RAM — kernel code/data/BSS (loaded by bootloader from `/boot/kernel`)
-- 0x00110000-0x0014FFFF: Process memory slots (8 × 32KB)
-  - Slot 0: 0x00110000-0x00117FFF (shell)
-  - Slot 1: 0x00118000-0x0011FFFF
+- 0x00110000-0x0018FFFF: Process memory slots (8 × 64KB)
+  - Slot 0: 0x00110000-0x0011FFFF (shell)
+  - Slot 1: 0x00120000-0x0012FFFF
   - ...
-  - Slot 7: 0x00148000-0x0014FFFF
-- 0x00150000-0x00157FFF: Shared memory segments (8 × 4KB)
-- 0x00158000-0x00177FFF: Page table pool (32 × 4KB pages for SV32 page tables)
+  - Slot 7: 0x00180000-0x0018FFFF
+- 0x00190000-0x00197FFF: Shared memory segments (8 × 4KB)
+- 0x00198000-0x001B7FFF: Page table pool (32 × 4KB pages for SV32 page tables)
 - 0x001F0000-0x001FEFFF: Bootloader BSS (60KB, used only during boot)
 - 0x001FFFFC: Initial stack pointer (shared by bootloader and kernel)
 - 0x00200000: Block device MMIO
 - 0xFFFF0004/0008: Console input MMIO (receiver control/data)
 - 0xFFFF000C: Console output MMIO
 
-Each 32KB slot holds code + data + BSS + stack (stack grows down from slot top - 0x100).
+Each 64KB slot holds code + data + BSS + stack (stack grows down from slot top - 0x100).
 
 ## Boot Process
 
@@ -240,7 +242,7 @@ User programs communicate with the kernel via the `ecall` instruction. The sysca
 
 ## Process Model
 
-Each program runs in its own fixed 32KB memory slot with a per-process trap frame, file descriptors, and PID. Preemptive multitasking via timer interrupt (round-robin scheduling).
+Each program runs in its own fixed 64KB memory slot with a per-process trap frame, file descriptors, and PID. Preemptive multitasking via timer interrupt (round-robin scheduling).
 
 **Process states:**
 - `PROC_FREE` (0) — slot available
@@ -257,7 +259,7 @@ Each program runs in its own fixed 32KB memory slot with a per-process trap fram
 - `SLEEP_IO` (4) — blocked on pipe read/write
 - `SLEEP_SEM` (5) — blocked on semaphore wait
 
-**fork() semantics:** `fork()` copies the parent's entire 32KB memory slot to a new slot, duplicates all file descriptors (incrementing pipe reference counts), copies the environment, and adjusts the child's registers by the memory offset delta. Returns child PID to parent, 0 to child.
+**fork() semantics:** `fork()` copies the parent's entire 64KB memory slot to a new slot, duplicates all file descriptors (incrementing pipe reference counts), and copies the environment. The child runs at the same virtual addresses through its own page table, so no register is adjusted. Returns child PID to parent, 0 to child.
 
 **exec() semantics:** `exec()` replaces the current process image with a new program. File descriptors are preserved across exec (important for pipe redirection via fork+dup2+exec). Environment is preserved unless envp is non-NULL.
 
@@ -265,7 +267,7 @@ Each program runs in its own fixed 32KB memory slot with a per-process trap fram
 
 **spawn() semantics:** `spawn()` combines fork+exec+wait in a single syscall (legacy). Loads the child into a new slot, parent sleeps until child exits.
 
-**Pipes:** Kernel-buffered IPC channels (256-byte circular buffer, max 8 pipes). Created via `pipe()`, integrated with `read()/write()/close()/dup()/dup2()/fork()`. Blocking uses ecall-retry: when a pipe operation would block, the process sleeps without advancing mepc past the ecall instruction; when woken, the ecall re-executes and retries the operation. Reference counting tracks open read/write ends independently. EOF is returned when all write ends are closed; EPIPE when all read ends are closed.
+**Pipes:** Kernel-buffered IPC channels (512-byte circular buffer, max 8 pipes). Created via `pipe()`, integrated with `read()/write()/close()/dup()/dup2()/fork()`. Blocking uses ecall-retry: when a pipe operation would block, the process sleeps without advancing sepc past the ecall instruction; when woken, the ecall re-executes and retries the operation. Reference counting tracks open read/write ends independently. EOF is returned when all write ends are closed; EPIPE when all read ends are closed.
 
 **Context switching:** The scheduler uses round-robin with timer interrupts. `sys_fork`, `sys_exec`, `sys_exit`, and blocking pipe operations call `schedule()` which selects the next PROC_READY process and switches to it via `trap_ret()`.
 
@@ -279,14 +281,14 @@ The kernel uses RISC-V SV32 paging (2-level page tables, 4KB pages, 4MB megapage
 
 **Address space layout (per-process):**
 - `0x00000000-0x003FFFFF`: Kernel megapage (identity-mapped, S-mode only)
-- `0x00400000-0x00407FFF`: User code/data (32KB slot mapped to process's physical slot)
+- `0x00400000-0x0040FFFF`: User code/data (64KB slot mapped to process's physical slot)
 - `0x00500000+`: Shared memory segments (mapped on `shmat`, 4KB each)
 - `0xFFC00000-0xFFFFFFFF`: MMIO megapage (identity-mapped, S-mode only)
 
 **Key constants** (`vm.h`):
 - `USER_VA_BASE = 0x00400000` — all user programs are loaded at this virtual address
 - `SHM_VA_BASE = 0x00500000` — shared memory segments mapped here
-- `PT_POOL_BASE = 0x00158000` — physical memory pool for page table pages (32 × 4KB)
+- `PT_POOL_BASE = 0x00198000` — physical memory pool for page table pages (32 × 4KB)
 
 **Page table management:**
 - `setup_process_vm(slot)` — allocates page table root + L0 tables, maps kernel/MMIO megapages and user slot
@@ -296,8 +298,8 @@ The kernel uses RISC-V SV32 paging (2-level page tables, 4KB pages, 4MB megapage
 
 **User pointer translation** (syscall boundary):
 - `uva_to_pa(proc, uva)` — translates user virtual address to physical address
-- `copyin/copyout/copyinstr` — safe kernel↔user memory copy via page table walk
-- All syscalls use `copyinstr` for user string arguments and `copyin`/`copyout` for buffers
+- `copyinstr` — copy a user string into a kernel buffer via page table walk
+- All syscalls use `copyinstr` for user string arguments and `user_to_kern` for buffers
 
 **Privilege modes:** Boot in M-mode → kernel drops to S-mode (`drop_to_smode` in `main.c`) → user programs run in U-mode. M-mode retains a minimal trap handler (`m_trap.S`) that forwards timer interrupts to S-mode via SSIP and handles ecalls from S-mode.
 
@@ -457,10 +459,16 @@ Update the `RISCV_TOOL_PREFIX` variable in the Makefile if your toolchain is in 
 - **Logisim**: RV32IM_Zicsr, ILP32 ABI
   - Bootloader: `boot/boot.lds` (ROM at 0x0, BSS at 0x001F0000)
   - Kernel: `kernel/kernel.lds` (loaded at 0x00100000)
-  - User programs: `user/user.lds` (linked at address 0, relocated at load time)
+  - User programs: `user/user.lds` (linked at USER_VA_BASE, 0x00400000, and copied into its slot at load time)
 - The `zicsr` extension is required for CSR instructions used in trap handling
 
 ## Known PIE Limitations
+
+Glendalough links its programs at `USER_VA_BASE` and runs them there, so an absolute address in a
+program is right and nothing below can go wrong here. The user programs are the same files as
+Blackrock's, though, where a program is linked at address 0 and runs in whichever slot it is loaded
+into: keep to these rules so that the programs stay the same in both versions (`make check-pie`
+checks them). The details below describe Blackrock's case.
 
 When writing position-independent user programs:
 - **Avoid static pointer array initialization** — pointers get absolute addresses baked in

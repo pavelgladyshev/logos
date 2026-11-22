@@ -24,8 +24,8 @@
 /* Magic number to identify our filesystem */
 #define FS_MAGIC           0x53465346  /* "FSFS" */
 
-/* Version of the disk layout in this file, kept in the superblock: 3 = Glendalough
- * (59 direct blocks and one indirect block per inode). A change to the layout gets a
+/* Version of the disk layout in this file, kept in the superblock: 3 = Blackrock and Glendalough
+ * (64 inodes, 59 direct blocks and one indirect block per inode). A change to the layout gets a
  * new version, so that no kernel, fstool or logosfs of another layout mounts the disk. */
 #define FS_VERSION         3
 
@@ -34,6 +34,7 @@
 #define FT_FILE            1         /* Regular file */
 #define FT_DIR             2         /* Directory */
 #define FT_CHARDEV         3         /* Character device */
+/* LIMITATIONS.md K9: a pipe has no name in the file system */
 #define FT_PIPE            4         /* Pipe (IPC) */
 
 /* Error codes */
@@ -67,6 +68,7 @@ struct superblock {
     uint8_t  reserved[BLOCK_SIZE - 44];  /* Padding to fill block */
 };
 
+/* LIMITATIONS.md G4: no owner and no permissions */
 /*
  * Inode structure
  * Contains metadata about a file or directory
@@ -82,7 +84,7 @@ struct inode {
     uint16_t indirect;               /* Single indirect block pointer */
 };
 
-/* Size: 4 + 1 + 1 + 1 + 1 + 60*2 = 128 bytes per inode */
+/* Size: 4 + 1 + 1 + 1 + 1 + 59*2 + 2 = 128 bytes per inode */
 #define INODE_SIZE         sizeof(struct inode)
 #define INODES_PER_BLOCK   (BLOCK_SIZE / INODE_SIZE)
 

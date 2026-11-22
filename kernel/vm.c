@@ -44,8 +44,8 @@ void vm_build_shared_l0(void)
     for (i = 0; i <= 15; i++)
         l0[i] = MAKE_PTE(PA_TO_PPN(i * PAGE_SIZE), PTE_KERN_RWX);
 
-    /* Kernel + process slots + SHM + PT pool: 0x00100000-0x00177FFF (pages 256-375) */
-    for (i = 256; i <= 375; i++)
+    /* Kernel + process slots + SHM + PT pool: 0x00100000-0x001B7FFF (pages 256-439) */
+    for (i = 256; i <= 439; i++)
         l0[i] = MAKE_PTE(PA_TO_PPN(i * PAGE_SIZE), PTE_KERN_RWX);
 
     /* Bootloader BSS + stack: 0x001F0000-0x001FFFFF (pages 496-511) */
@@ -133,6 +133,7 @@ int map_page(uint32_t root_pa, uint32_t va, uint32_t pa, uint32_t flags)
         root[vpn1] = MAKE_PTE(PA_TO_PPN(l0_pa), PTE_V);
         l0 = (uint32_t *)l0_pa;
     } else {
+        /* LIMITATIONS.md G7: Glendalough creates no megapages; the test stays */
         /* L1 entry exists — make sure it's not a leaf (megapage) */
         if (l1_pte & (PTE_R | PTE_W | PTE_X)) {
             printf("VM: map_page conflict - L1[%d] is a megapage\n", vpn1);
@@ -196,11 +197,12 @@ void build_kernel_mappings(uint32_t root_pa)
     root[1023] = MAKE_PTE(PA_TO_PPN(mmio_l0_pa), PTE_V);
 }
 
-void build_user_mappings(uint32_t root_pa, int slot)
+int build_user_mappings(uint32_t root_pa, int slot)
 {
     uint32_t pa = PROC_SLOT_BASE(slot);
+    /* LIMITATIONS.md G2: the whole slot, with no guard page under the stack */
     /* Map physical slot to USER_VA_BASE (0x400000) with U bit */
-    map_range(root_pa, USER_VA_BASE, pa, PROC_SLOT_SIZE, PTE_USER_RWX);
+    return map_range(root_pa, USER_VA_BASE, pa, PROC_SLOT_SIZE, PTE_USER_RWX);
     /* Note: shared memory is mapped on demand by sys_shmat */
 }
 
@@ -216,7 +218,7 @@ int setup_process_vm(int slot)
 
     p->pt_root_pa = pt_root;
     build_kernel_mappings(pt_root);
-    build_user_mappings(pt_root, slot);
+    if (build_user_mappings(pt_root, slot) < 0) return -1;
     /* SATP: SV32 mode, ASID=slot, root PPN */
     p->satp = MAKE_SATP(1, slot, PA_TO_PPN(pt_root));
     return 0;
@@ -226,6 +228,7 @@ int setup_process_vm(int slot)
  * Address Translation
  * ============================ */
 
+/* LIMITATIONS.md G3: by arithmetic; a segment need not be attached */
 uint32_t uva_to_pa(int slot, uint32_t uva)
 {
     /* User code/data region */
@@ -268,22 +271,6 @@ uint32_t uva_range_to_pa(int slot, uint32_t uva, uint32_t len)
     if (!end) return 0;
     if (len > end - uva) return 0;      /* runs past the region (no overflow) */
     return uva_to_pa(slot, uva);
-}
-
-int copyin(int slot, void *kbuf, uint32_t uva, uint32_t len)
-{
-    uint32_t pa = uva_range_to_pa(slot, uva, len);
-    if (!pa) return -1;
-    memcpy(kbuf, (void *)pa, len);
-    return (int)len;
-}
-
-int copyout(int slot, uint32_t uva, const void *kbuf, uint32_t len)
-{
-    uint32_t pa = uva_range_to_pa(slot, uva, len);
-    if (!pa) return -1;
-    memcpy((void *)pa, kbuf, len);
-    return (int)len;
 }
 
 int copyinstr(int slot, char *kbuf, uint32_t uva, uint32_t maxlen)

@@ -8,7 +8,7 @@
 #include "device.h"
 
 /* Resolve logical block index to physical block number via direct/indirect.
- * Returns 0 if unmapped, or block number. indirect_buf is used as scratch. */
+ * Returns 0 if unmapped, or block number. block_buf is used as scratch. */
 static uint16_t get_block_num(const struct inode *in, uint32_t block_idx) {
     if (block_idx < DIRECT_BLOCKS)
         return in->blocks[block_idx];
@@ -59,6 +59,7 @@ int file_create(uint32_t dir_ino, const char *name) {
     return ino;
 }
 
+/* LIMITATIONS.md B5: no cache, every call reads the device */
 int file_read(uint32_t ino, uint32_t offset, void *buf, uint32_t len) {
     struct inode in;
 
@@ -219,7 +220,7 @@ int file_write(uint32_t ino, uint32_t offset, const void *buf, uint32_t len) {
                 if (nb < 0) {
                     if (offset > in.size) in.size = offset;
                     inode_write(ino, &in);
-                    return bytes_written > 0 ? bytes_written : nb;
+                    return bytes_written > 0 ? (int)bytes_written : nb;
                 }
                 in.blocks[block_idx] = nb;
                 bnum = nb;
@@ -235,7 +236,7 @@ int file_write(uint32_t ino, uint32_t offset, const void *buf, uint32_t len) {
                 if (ib < 0) {
                     if (offset > in.size) in.size = offset;
                     inode_write(ino, &in);
-                    return bytes_written > 0 ? bytes_written : ib;
+                    return bytes_written > 0 ? (int)bytes_written : ib;
                 }
                 in.indirect = ib;
                 /* block_alloc already zeroed the block */
@@ -248,7 +249,7 @@ int file_write(uint32_t ino, uint32_t offset, const void *buf, uint32_t len) {
                 if (nb < 0) {
                     if (offset > in.size) in.size = offset;
                     inode_write(ino, &in);
-                    return bytes_written > 0 ? bytes_written : nb;
+                    return bytes_written > 0 ? (int)bytes_written : nb;
                 }
                 bnum = nb;
                 /* Re-read indirect block (block_alloc clobbered block_buf) */

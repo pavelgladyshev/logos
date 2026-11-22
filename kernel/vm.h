@@ -32,6 +32,7 @@
 /* Convenience flag combos */
 #define PTE_KERN_RWX    (PTE_V | PTE_R | PTE_W | PTE_X | PTE_A | PTE_D)
 #define PTE_KERN_RW     (PTE_V | PTE_R | PTE_W | PTE_A | PTE_D)
+/* LIMITATIONS.md G1: code is mapped writable */
 #define PTE_USER_RWX    (PTE_V | PTE_R | PTE_W | PTE_X | PTE_U | PTE_A | PTE_D)
 #define PTE_USER_RW     (PTE_V | PTE_R | PTE_W | PTE_U | PTE_A | PTE_D)
 
@@ -58,8 +59,9 @@
  * Page Table Pool
  * ============================ */
 
+/* LIMITATIONS.md G6: a fixed pool of 32 pages */
 /* Physical region reserved for page tables: 128KB = 32 pages of 4KB */
-#define PT_POOL_BASE    0x00158000
+#define PT_POOL_BASE    0x00198000
 #define PT_POOL_PAGES   32
 #define PT_POOL_END     (PT_POOL_BASE + PT_POOL_PAGES * PAGE_SIZE)
 
@@ -68,8 +70,8 @@
  * ============================ */
 
 #define USER_VA_BASE    0x00400000
-#define USER_VA_END     (USER_VA_BASE + 0x8000)     /* 32KB */
-#define USER_STACK_TOP  (USER_VA_BASE + 0x8000 - 0x100)
+#define USER_VA_END     (USER_VA_BASE + 0x10000)    /* 64KB */
+#define USER_STACK_TOP  (USER_VA_BASE + 0x10000 - 0x100)
 
 #define SHM_VA_BASE     0x00500000
 
@@ -136,11 +138,12 @@ void build_kernel_mappings(uint32_t root_pa);
 /*
  * Build user-space mappings for a process slot.
  * Maps PROC_SLOT_BASE(slot) to USER_VA_BASE with U bit.
+ * Returns 0 on success, -1 on failure.
  */
-void build_user_mappings(uint32_t root_pa, int slot);
+int build_user_mappings(uint32_t root_pa, int slot);
 
 /*
- * Set up identity-mapped page tables for a process slot.
+ * Set up the page tables of a process slot.
  * Allocates root PT, builds kernel + user mappings, sets p->satp.
  * Returns 0 on success, -1 on failure.
  */
@@ -157,18 +160,6 @@ uint32_t uva_to_pa(int slot, uint32_t uva);
 uint32_t uva_range_to_pa(int slot, uint32_t uva, uint32_t len);
 
 /*
- * Copy data from user VA to kernel buffer.
- * Returns number of bytes copied, or -1 on error.
- */
-int copyin(int slot, void *kbuf, uint32_t uva, uint32_t len);
-
-/*
- * Copy data from kernel buffer to user VA.
- * Returns number of bytes copied, or -1 on error.
- */
-int copyout(int slot, uint32_t uva, const void *kbuf, uint32_t len);
-
-/*
  * Copy null-terminated string from user VA to kernel buffer.
  * Returns string length, or -1 on error.
  */
@@ -180,24 +171,15 @@ int copyinstr(int slot, char *kbuf, uint32_t uva, uint32_t maxlen);
 
 /* S-mode CSR accessors */
 void write_satp(uint32_t val);
-uint32_t read_satp(void);
 void sfence_vma(void);
-void write_stvec(uint32_t val);
-void write_sscratch(uint32_t val);
-uint32_t read_scause(void);
 uint32_t read_stval(void);
-uint32_t read_sepc(void);
-void write_sepc(uint32_t val);
 
 /* Privilege mode helpers */
-void set_mpp_supervisor(void);  /* Set mstatus.MPP = Supervisor (01) */
 void clear_spp(void);           /* Clear sstatus.SPP = User (0) */
 void set_spie(void);            /* Set sstatus.SPIE = 1 */
 void clear_ssip(void);          /* Clear SIP.SSIP to acknowledge S-mode SW interrupt */
 void clear_stip(void);          /* Clear SIP.STIP (may be read-only from S-mode) */
 void write_sie(uint32_t val);   /* Write supervisor interrupt enable */
-void set_sstatus_bit(uint32_t mask);
-void clear_sstatus_bit(uint32_t mask);
 
 /* M-mode setup */
 void set_mtvec(uint32_t handler);  /* Write M-mode trap vector */

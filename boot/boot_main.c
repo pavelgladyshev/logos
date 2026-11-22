@@ -22,6 +22,10 @@ void boot_main(void)
         boot_puts("BOOT: No filesystem\n");
         boot_halt();
     }
+    if (sb.version != FS_VERSION) {
+        boot_puts("BOOT: Wrong filesystem version\n");
+        boot_halt();
+    }
 
     /* Step 2: Resolve path /boot/kernel */
     if (boot_resolve_path(KERNEL_PATH, &sb, block_buf, &kernel_ino) != 0) {

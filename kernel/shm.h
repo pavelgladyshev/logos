@@ -3,7 +3,8 @@
  * Licensed under Creative Commons Attribution International License 4.0
  *
  * Provides 8 fixed-size (4KB) shared memory segments at physical
- * addresses 0x150000-0x157FFF. No MMU — shmat returns the physical address.
+ * addresses 0x190000-0x197FFF. shmat maps a segment into the process at
+ * SHM_VA_BASE + id * 4KB and returns that virtual address.
  * Key-based API (System V style) with refcounting.
  */
 
@@ -14,7 +15,7 @@
 
 #define MAX_SHM         8
 #define SHM_SEG_SIZE    4096
-#define SHM_BASE_ADDR   0x00150000
+#define SHM_BASE_ADDR   0x00190000
 
 /* Flags for shmget / semget */
 #define IPC_CREAT       0x100

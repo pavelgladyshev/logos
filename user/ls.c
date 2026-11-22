@@ -8,7 +8,7 @@
 
 #include "libc.h"
 
-#define MAX_ENTRIES 32
+#define MAX_ENTRIES 64
 
 int main(int argc, char *argv[])
 {
@@ -31,7 +31,7 @@ int main(int argc, char *argv[])
     }
 
     int i;
-    for (i = 0; i < count; i++) {
+    for (i = 0; i < count && i < MAX_ENTRIES; i++) {
         struct stat_info st;
         char fullpath[128];
         int plen;

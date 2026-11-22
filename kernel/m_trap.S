@@ -38,7 +38,7 @@ m_trap_handler:
      *
      * They must NOT be pushed on the interrupted stack: if the timer fires
      * while a user program runs, sp holds a user *virtual* address
-     * (around 0x407Fxx), but M-mode accesses are not translated, so the
+     * (around 0x40FFxx), but M-mode accesses are not translated, so the
      * push and pop would go to that *physical* address, where there is no
      * RAM, and they would come back as garbage.  The kernel is linked at its
      * physical address, so static save slots work in M-mode.  Only one
@@ -118,44 +118,14 @@ write_satp:
     csrw 0x180, a0     /* satp = a0 */
     ret
 
-    .globl read_satp
-read_satp:
-    csrr a0, 0x180     /* a0 = satp */
-    ret
-
     .globl sfence_vma
 sfence_vma:
     .word 0x12000073   /* sfence.vma zero, zero */
     ret
 
-    .globl write_stvec
-write_stvec:
-    csrw 0x105, a0     /* stvec = a0 */
-    ret
-
-    .globl write_sscratch
-write_sscratch:
-    csrw 0x140, a0     /* sscratch = a0 */
-    ret
-
-    .globl read_scause
-read_scause:
-    csrr a0, 0x142     /* a0 = scause */
-    ret
-
     .globl read_stval
 read_stval:
     csrr a0, 0x143     /* a0 = stval */
-    ret
-
-    .globl read_sepc
-read_sepc:
-    csrr a0, 0x141     /* a0 = sepc */
-    ret
-
-    .globl write_sepc
-write_sepc:
-    csrw 0x141, a0     /* sepc = a0 */
     ret
 
 /* ============================
@@ -166,24 +136,6 @@ write_sepc:
     .globl write_sie
 write_sie:
     csrw 0x104, a0     /* sie = a0 */
-    ret
-
-/* uint32_t read_sie(void) */
-    .globl read_sie
-read_sie:
-    csrr a0, 0x104     /* a0 = sie */
-    ret
-
-/* void set_sstatus_bit(uint32_t mask) — set bits in sstatus */
-    .globl set_sstatus_bit
-set_sstatus_bit:
-    csrs 0x100, a0     /* sstatus |= a0 */
-    ret
-
-/* void clear_sstatus_bit(uint32_t mask) — clear bits in sstatus */
-    .globl clear_sstatus_bit
-clear_sstatus_bit:
-    csrc 0x100, a0     /* sstatus &= ~a0 */
     ret
 
 /* ============================
@@ -214,27 +166,6 @@ write_mideleg:
 /* ============================
  * Privilege mode transitions
  * ============================ */
-
-/*
- * void set_mpp_supervisor(void)
- *
- * Set mstatus.MPP to Supervisor (01) and MPIE to 1.
- * After mret, CPU enters S-mode with interrupts enabled.
- */
-    .globl set_mpp_supervisor
-set_mpp_supervisor:
-    csrr t0, mstatus
-    /* Clear MPP bits (11:12) */
-    li   t1, ~(3 << 11)
-    and  t0, t0, t1
-    /* Set MPP = 01 (Supervisor) */
-    li   t1, (1 << 11)
-    or   t0, t0, t1
-    /* Set MPIE = 1 (enable interrupts on mret) */
-    li   t1, (1 << 7)
-    or   t0, t0, t1
-    csrw mstatus, t0
-    ret
 
 /*
  * void clear_spp(void)
@@ -288,7 +219,7 @@ clear_stip:
  *
  * Set mepc to entry address and execute mret to transition from
  * M-mode to S-mode. Caller must have set mstatus.MPP=Supervisor
- * and mstatus.MPIE=1 beforehand.
+ * and mstatus.MPIE=0 beforehand.
  *
  * Never returns.
  */

@@ -79,6 +79,7 @@ int dir_add(uint32_t dir_ino, const char *name, uint32_t ino) {
                 if (block_write(dir.blocks[b], block_buf) != FS_OK) {
                     return FS_ERR_IO;
                 }
+                /* LIMITATIONS.md B10: the size grows even when a hole is filled */
                 dir.size += DIRENT_SIZE;
                 return inode_write(dir_ino, &dir);
             }

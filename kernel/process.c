@@ -207,6 +207,7 @@ void proc_set_env_int(int slot, const char *name, int value) {
 void schedule(void) {
     int i, next;
     for (i = 0; i < MAX_PROCS; i++) {
+        /* LIMITATIONS.md K10: slots in order, no priorities */
         next = (current_proc + 1 + i) % MAX_PROCS;
         if (proc_table[next].state == PROC_READY) {
             proc_table[next].state = PROC_RUNNING;
@@ -221,5 +222,6 @@ void schedule(void) {
             trap_ret(&proc_table[next].tf);  /* never returns */
         }
     }
+    /* LIMITATIONS.md K2: no idle process; schedule() returns */
     /* No runnable process found — kernel main loop handles shell restart */
 }

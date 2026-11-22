@@ -70,6 +70,7 @@ int pipe_write(int pipe_idx, const void *buf, uint32_t len) {
     uint32_t to_write;
     uint32_t i;
 
+    /* LIMITATIONS.md K14: no signal for a broken pipe, only -1 */
     if (p->read_refs == 0) {
         return -1;      /* EPIPE: no readers — broken pipe */
     }
@@ -122,6 +123,7 @@ void pipe_dup_fd(int pipe_idx, int pipe_end) {
     }
 }
 
+/* LIMITATIONS.md K7: wakes every sleeper on the pipe */
 void pipe_wakeup(int pipe_idx) {
     int i;
     for (i = 0; i < MAX_PROCS; i++) {

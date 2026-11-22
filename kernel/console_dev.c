@@ -10,29 +10,18 @@
 #include "console.h"
 #include "console_dev.h"
 
-/* Debug: set to 1 to print RCR/RDR values during console reads */
-#define CONSOLE_DEBUG 0
-
 static int console_read(uint8_t minor, void *buf, uint32_t len) {
     uint8_t *dst = (uint8_t *)buf;
     uint32_t i = 0;
 
-#if CONSOLE_DEBUG
-    printf("[con_read] buf=0x%x len=%d\n", (uint32_t)buf, len);
-#endif
-
     /* Line-buffered input with echo */
     while (i < len) {
+        /* LIMITATIONS.md K3: polls with interrupts off; nothing else runs */
         /* Poll for data available (bit 0 of RCR) */
         while ((CONSOLE_RCR & 1) == 0) {
             /* busy wait for keyboard input */
         }
         uint8_t c = (uint8_t)CONSOLE_RDR;
-
-#if CONSOLE_DEBUG
-        printf("[con_read] c='%c' (0x%x) i=%d\n",
-               (c >= 0x20 && c < 0x7f) ? c : '.', c, i);
-#endif
 
         if (c == 0x04) {        /* Ctrl-D: signal EOF */
             break;              /* Return bytes read so far (0 = EOF) */
@@ -78,8 +67,6 @@ static int console_write(uint8_t minor, const void *buf, uint32_t len) {
 
 /* Console device operations - read/write terminal */
 static struct device_ops console_ops = {
-    .open  = 0,
-    .close = 0,
     .read  = console_read,
     .write = console_write
 };

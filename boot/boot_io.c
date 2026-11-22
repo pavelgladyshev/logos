@@ -45,35 +45,6 @@ void boot_puts(const char *s)
         boot_putchar(*s++);
 }
 
-void boot_put_hex(uint32_t n)
-{
-    int i;
-    int started = 0;
-    for (i = 28; i >= 0; i -= 4) {
-        int digit = (n >> i) & 0xF;
-        if (digit != 0 || started || i == 0) {
-            boot_putchar(digit < 10 ? '0' + digit : 'a' + digit - 10);
-            started = 1;
-        }
-    }
-}
-
-void boot_put_uint(uint32_t n)
-{
-    char buf[12];
-    int i = 0;
-    if (n == 0) {
-        boot_putchar('0');
-        return;
-    }
-    while (n > 0) {
-        buf[i++] = '0' + (n % 10);
-        n /= 10;
-    }
-    while (i > 0)
-        boot_putchar(buf[--i]);
-}
-
 void boot_halt(void)
 {
     boot_puts("BOOT: System halted.\n");

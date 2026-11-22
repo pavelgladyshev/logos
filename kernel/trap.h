@@ -8,12 +8,6 @@
 
 #include "types.h"
 
-/* Machine cause register values */
-#define MCAUSE_INTERRUPT  ((uint32_t)0x80000000)  /* Interrupt flag (bit 31) */
-#define MCAUSE_EXTERNAL   ((uint32_t)0xb)         /* External interrupt */
-#define MCAUSE_TIMER      ((uint32_t)0x7)         /* Timer interrupt */
-#define MCAUSE_ECALL      ((uint32_t)0xb)         /* Environment call from M-mode */
-
 /*
  * Trap frame structure - saves complete CPU context during traps.
  * Used for saving program context when handling interrupts, exceptions, and syscalls.
@@ -22,7 +16,7 @@ struct trap_frame {
     /*   0 */ uint32_t reserved1;
     /*   4 */ uint32_t c_trap_sp;    /* Stack pointer for C trap handler */
     /*   8 */ uint32_t c_trap;       /* Pointer to C trap handler function */
-    /*  12 */ uint32_t mepc;         /* Machine exception program counter */
+    /*  12 */ uint32_t epc;          /* Exception program counter (sepc) */
     /*  16 */ uint32_t reserved3;
     /*  20 */ uint32_t ra;           /* Return address */
     /*  24 */ uint32_t sp;           /* Stack pointer (user program) */
@@ -61,8 +55,8 @@ typedef struct trap_frame trap_frame_t;
 
 /*
  * Set up trap handler.
- * Writes address of assembly trap_handler routine into CPU's mtvec register
- * and writes address of trap_frame structure into CPU's mscratch register.
+ * Writes address of assembly trap_handler routine into CPU's stvec register
+ * and writes address of trap_frame structure into CPU's sscratch register.
  */
 void set_trap_handler(void (*handler)(void), trap_frame_t *tf);
 
@@ -89,9 +83,9 @@ void disable_interrupts(void);
 void trap_handler(void);
 
 /*
- * Get value of mcause register (reason for trap).
+ * Get the cause of the trap (the scause register).
  */
-uint32_t get_mcause(void);
+uint32_t get_cause(void);
 
 /*
  * Assembly routine to restore context and return from trap.

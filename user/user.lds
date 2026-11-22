@@ -2,7 +2,8 @@
  * Linker script for relocatable (PIE) user programs
  * Licensed under Creative Commons Attribution International License 4.0
  *
- * Programs are linked at address 0 and relocated at load time.
+ * Programs are linked at USER_VA_BASE (0x00400000) and copied into their slot at
+ * load time; nothing in them is relocated.
  */
 
 OUTPUT_FORMAT("elf32-littleriscv", "elf32-littleriscv", "elf32-littleriscv")

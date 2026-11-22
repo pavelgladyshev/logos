@@ -19,34 +19,6 @@ int device_register(uint8_t major, struct device_ops *ops) {
     return FS_OK;
 }
 
-int device_unregister(uint8_t major) {
-    if (major >= MAX_DEVICES) {
-        return FS_ERR_INVALID;
-    }
-    device_table[major] = 0;
-    return FS_OK;
-}
-
-int device_open(uint8_t major, uint8_t minor) {
-    if (major >= MAX_DEVICES || device_table[major] == 0) {
-        return FS_ERR_NOT_FOUND;
-    }
-    if (device_table[major]->open) {
-        return device_table[major]->open(minor);
-    }
-    return FS_OK;  /* No open handler is OK */
-}
-
-int device_close(uint8_t major, uint8_t minor) {
-    if (major >= MAX_DEVICES || device_table[major] == 0) {
-        return FS_ERR_NOT_FOUND;
-    }
-    if (device_table[major]->close) {
-        return device_table[major]->close(minor);
-    }
-    return FS_OK;  /* No close handler is OK */
-}
-
 int device_read(uint8_t major, uint8_t minor, void *buf, uint32_t len) {
     if (major >= MAX_DEVICES || device_table[major] == 0) {
         return FS_ERR_NOT_FOUND;
