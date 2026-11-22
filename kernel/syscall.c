@@ -20,17 +20,12 @@
 #include "shm.h"
 #include "sem.h"
 
-/* Console minor device number */
-#define CONSOLE_MINOR  0
-
 /* Open flags (must match user/libc.h) */
 #define OPEN_WRONLY  1
 #define OPEN_RDWR    2
 #define OPEN_CREAT   0x100
 #define OPEN_TRUNC   0x200
 #define OPEN_APPEND  0x400
-
-/* Forward declaration — defined later in this file */
 
 /*
  * Get a file descriptor entry for the current process.
@@ -75,7 +70,7 @@ static int sys_exit(trap_frame_t *tf) {
 
     cur->exit_code = exit_status;
 
-    /* Orphan cleanup: reparent or free children of the exiting process */
+    /* Orphan cleanup: free the zombie children of the exiting process, orphan the others */
     for (i = 0; i < MAX_PROCS; i++) {
         if (proc_table[i].parent == current_proc) {
             if (proc_table[i].state == PROC_ZOMBIE) {
@@ -96,7 +91,7 @@ static int sys_exit(trap_frame_t *tf) {
                 parent->sleep_reason == SLEEP_WAIT) {
                 /* Wake parent with exit code as return value */
                 parent->tf.a0 = (uint32_t)exit_status;
-                parent->tf.mepc += 4;
+                parent->tf.epc += 4;
                 parent->state = PROC_READY;
                 parent->sleep_reason = SLEEP_NONE;
                 parent->sleep_chan = -1;
@@ -106,10 +101,11 @@ static int sys_exit(trap_frame_t *tf) {
 
                 /* Free child and reschedule */
                 proc_free(current_proc);
-                schedule();  /* never returns */
+                schedule();  /* never returns: the parent is ready */
             }
         }
 
+        /* LIMITATIONS.md K12: a zombie keeps its slot, shared memory and semaphores */
         /* Parent exists but is not waiting for us — become zombie.
          * Close pipe fds first so readers/writers get EOF/EPIPE wakeups.
          * Other resources (SHM, sems) are kept until the parent collects
@@ -125,9 +121,10 @@ static int sys_exit(trap_frame_t *tf) {
             }
         }
         cur->state = PROC_ZOMBIE;
-        schedule();  /* never returns */
+        schedule();  /* returns only if no process is ready */
     }
 
+    /* LIMITATIONS.md K1: an orphan also has no parent and also gets here */
     /* Top-level process (shell) — signal kernel */
     return 1;
 }
@@ -183,7 +180,7 @@ static int32_t sys_read(trap_frame_t *tf) {
             proc_table[current_proc].state = PROC_SLEEPING;
             proc_table[current_proc].sleep_reason = SLEEP_IO;
             proc_table[current_proc].sleep_chan = pipe_idx;
-            schedule();  /* never returns; woken process re-executes ecall */
+            schedule();  /* returns only if no process is ready; woken process re-executes ecall */
         }
         return result;
     }
@@ -253,7 +250,7 @@ static int32_t sys_write(trap_frame_t *tf) {
             cur->state = PROC_SLEEPING;
             cur->sleep_reason = SLEEP_IO;
             cur->sleep_chan = pipe_idx;
-            schedule();  /* never returns; woken process re-executes ecall */
+            schedule();  /* returns only if no process is ready; woken process re-executes ecall */
         }
         if (result >= 0) {
             result += (int)cur->pipe_written;     /* the whole write */
@@ -365,6 +362,7 @@ static int resolve_path(const char *path, char *abs_path, int abs_size) {
  */
 static int32_t sys_open(trap_frame_t *tf) {
     const char *path = (const char *)tf->a0;
+    /* LIMITATIONS.md B1: the access mode in flags is ignored */
     uint32_t flags = tf->a1;
     char resolved[MAX_ARG_LEN];
     uint32_t ino;
@@ -621,7 +619,7 @@ static int32_t sys_spawn(trap_frame_t *tf) {
     /* Set up child's trap frame */
     child->tf.c_trap_sp = proc_table[current_proc].tf.c_trap_sp;
     child->tf.c_trap = proc_table[current_proc].tf.c_trap;
-    child->tf.mepc = info.entry_point;
+    child->tf.epc = info.entry_point;
     child->tf.sp = sp;
     child->tf.ra = 0;  /* No return address */
     child->tf.a0 = (uint32_t)spawn_argc;
@@ -637,8 +635,8 @@ static int32_t sys_spawn(trap_frame_t *tf) {
     proc_table[current_proc].sleep_reason = SLEEP_CHILD;
     proc_table[current_proc].sleep_chan = child_slot;
 
-    /* Reschedule — scheduler will pick the child */
-    schedule();  /* never returns */
+    /* Reschedule — the scheduler usually picks the child */
+    schedule();  /* never returns: the child is ready */
 
     /* Not reached */
     return 0;
@@ -647,8 +645,8 @@ static int32_t sys_spawn(trap_frame_t *tf) {
 /*
  * sys_fork - Create a copy of the current process
  *
- * Copies the full 32KB memory slot, trap frame, env, and fds.
- * Adjusts child's registers (sp, mepc, ra, s0) by the memory delta.
+ * Copies the full 64KB memory slot, trap frame, env, and fds.
+ * Adjusts child's registers (sp, epc, ra, s0) by the memory delta.
  *
  * Returns: child PID to parent, 0 to child, -1 on error
  */
@@ -665,7 +663,8 @@ static int32_t sys_fork(trap_frame_t *tf) {
     }
     child = &proc_table[child_slot];
 
-    /* Copy the entire 32KB memory slot */
+    /* LIMITATIONS.md K6: the whole slot is copied, in use or not */
+    /* Copy the entire 64KB memory slot */
     memcpy((void *)child->mem_base, (void *)parent->mem_base, PROC_SLOT_SIZE);
 
     /* Copy trap frame */
@@ -676,10 +675,11 @@ static int32_t sys_fork(trap_frame_t *tf) {
     parent_base = parent->mem_base;
     parent_end = parent_base + PROC_SLOT_SIZE;
 
-    /* Always adjust sp and mepc — they point into the process's slot */
+    /* Always adjust sp and epc — they point into the process's slot */
     child->tf.sp += delta;
-    child->tf.mepc += delta;
+    child->tf.epc += delta;
 
+    /* LIMITATIONS.md K6: no other register and no pointer in memory is adjusted */
     /* Adjust ra and s0 if they point within parent's slot */
     if (child->tf.ra >= parent_base && child->tf.ra < parent_end) {
         child->tf.ra += delta;
@@ -688,8 +688,8 @@ static int32_t sys_fork(trap_frame_t *tf) {
         child->tf.s0 += delta;
     }
 
-    /* Advance child's mepc past the ecall instruction */
-    child->tf.mepc += 4;
+    /* Advance child's epc past the ecall instruction */
+    child->tf.epc += 4;
 
     /* Child's fork() returns 0 */
     child->tf.a0 = 0;
@@ -821,7 +821,7 @@ static int32_t sys_exec(trap_frame_t *tf) {
     setup_user_stack(cur->stack_top, &sp, &argv_addr);
 
     /* Reset trap frame for new program (keep c_trap_sp, c_trap) */
-    cur->tf.mepc = info.entry_point;
+    cur->tf.epc = info.entry_point;
     cur->tf.sp = sp;
     cur->tf.ra = 0;
     cur->tf.a0 = (uint32_t)spawn_argc;
@@ -855,6 +855,7 @@ static int32_t sys_wait(trap_frame_t *tf) {
         if (proc_table[i].parent != current_proc)
             continue;
         if (proc_table[i].state == PROC_ZOMBIE) {
+            /* LIMITATIONS.md K17: wait returns the status, not the PID */
             int exit_code = proc_table[i].exit_code;
             proc_free(i);
             proc_set_env_int(current_proc, "?", exit_code);  /* as sys_exit does */
@@ -873,9 +874,9 @@ static int32_t sys_wait(trap_frame_t *tf) {
     proc_table[current_proc].state = PROC_SLEEPING;
     proc_table[current_proc].sleep_reason = SLEEP_WAIT;
     proc_table[current_proc].sleep_chan = -1;
-    schedule();  /* never returns; sys_exit will wake us */
+    schedule();  /* returns only if no process is ready; sys_exit will wake us */
 
-    /* Not reached */
+    /* Reached only if no process is ready */
     return 0;
 }
 
@@ -1023,7 +1024,7 @@ static int32_t sys_pipe(trap_frame_t *tf) {
 /*
  * sys_readdir - List directory entries
  * a0 = path, a1 = dirent buffer, a2 = max_entries
- * Returns: number of entries read, or negative error
+ * Returns: number of entries in the directory, or negative error
  */
 static int32_t sys_readdir(trap_frame_t *tf) {
     const char *path = (const char *)tf->a0;
@@ -1179,6 +1180,8 @@ static int32_t sys_setenv(trap_frame_t *tf) {
     int vlen = strlen(value);
     int idx;
     char *s;
+
+    if (strcmp(name, "CWD") == 0) { tf->a0 = tf->a1; return sys_chdir(tf); }
 
     if (nlen + 1 + vlen >= MAX_ENV_LEN) {
         vlen = MAX_ENV_LEN - nlen - 2;
@@ -1420,6 +1423,7 @@ static int32_t sys_kill(trap_frame_t *tf) {
     for (i = 0; i < MAX_PROCS; i++) {
         if (proc_table[i].state != PROC_FREE && proc_table[i].pid == target_pid) {
             if (i == current_proc) return -1;
+            /* LIMITATIONS.md K1: an orphan cannot be killed either */
             if (proc_table[i].parent == -1) return -1;
 
             /* As in sys_exit: the victim's children lose their parent (those
@@ -1454,6 +1458,7 @@ static int32_t sys_kill(trap_frame_t *tf) {
                 (proc_table[parent].sleep_reason == SLEEP_WAIT ||
                  (proc_table[parent].sleep_reason == SLEEP_CHILD &&
                   proc_table[parent].sleep_chan == i))) {
+                /* LIMITATIONS.md K5: the parent's a0 and epc are left alone */
                 proc_table[parent].state = PROC_READY;
             }
 
@@ -1596,7 +1601,7 @@ static int32_t sys_semwait(trap_frame_t *tf) {
         proc_table[current_proc].state = PROC_SLEEPING;
         proc_table[current_proc].sleep_reason = SLEEP_SEM;
         proc_table[current_proc].sleep_chan = sem_id;
-        schedule();  /* never returns; woken process re-executes ecall */
+        schedule();  /* returns only if no process is ready; woken process re-executes ecall */
     }
     return result;
 }
@@ -1801,8 +1806,8 @@ int syscall_dispatch(trap_frame_t *tf) {
     /* Store return value in a0 */
     tf->a0 = (uint32_t)result;
 
-    /* Advance mepc past the ecall instruction (4 bytes) */
-    tf->mepc += 4;
+    /* Advance epc past the ecall instruction (4 bytes) */
+    tf->epc += 4;
 
     return 0;  /* Continue execution */
 }

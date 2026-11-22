@@ -15,7 +15,8 @@
 /* File system constants */
 #define BLOCK_SIZE         512       /* Size of each block in bytes */
 #define MAX_FILENAME       28        /* Maximum filename length */
-#define DIRECT_BLOCKS      60        /* Number of direct block pointers in inode */
+#define DIRECT_BLOCKS      59        /* Number of direct block pointers in inode */
+#define INDIRECT_ENTRIES    (BLOCK_SIZE / sizeof(uint16_t))  /* 256 entries per indirect block */
 #define MAX_INODES         64        /* Maximum number of inodes */
 #define MAX_BLOCKS         1024      /* Maximum number of blocks */
 #define ROOT_INODE         0         /* Inode number of root directory */
@@ -23,16 +24,17 @@
 /* Magic number to identify our filesystem */
 #define FS_MAGIC           0x53465346  /* "FSFS" */
 
-/* Version of the disk layout in this file, kept in the superblock: 2 = Blackrock
- * (64 inodes, 60 direct blocks per inode, no indirect block). A change to the layout gets a
+/* Version of the disk layout in this file, kept in the superblock: 3 = Blackrock and Glendalough
+ * (64 inodes, 59 direct blocks and one indirect block per inode). A change to the layout gets a
  * new version, so that no kernel, fstool or logosfs of another layout mounts the disk. */
-#define FS_VERSION         2
+#define FS_VERSION         3
 
 /* File types */
 #define FT_FREE            0         /* Inode is free */
 #define FT_FILE            1         /* Regular file */
 #define FT_DIR             2         /* Directory */
 #define FT_CHARDEV         3         /* Character device */
+/* LIMITATIONS.md K9: a pipe has no name in the file system */
 #define FT_PIPE            4         /* Pipe (IPC) */
 
 /* Error codes */
@@ -78,9 +80,10 @@ struct inode {
     uint8_t  minor;            /* Minor device number (for FT_CHARDEV) */
     uint8_t  link_count;       /* Number of hard links to this inode */
     uint16_t blocks[DIRECT_BLOCKS];  /* Direct block pointers (16-bit indices) */
+    uint16_t indirect;               /* Single indirect block pointer */
 };
 
-/* Size: 4 + 1 + 1 + 1 + 1 + 60*2 = 128 bytes per inode */
+/* Size: 4 + 1 + 1 + 1 + 1 + 59*2 + 2 = 128 bytes per inode */
 #define INODE_SIZE         sizeof(struct inode)
 #define INODES_PER_BLOCK   (BLOCK_SIZE / INODE_SIZE)
 

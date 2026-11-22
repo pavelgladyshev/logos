@@ -1,13 +1,16 @@
 #!/usr/bin/expect -f
 #
 # Test fork/exec/wait functionality in Logisim
+# Usage: test_fork.sh <Logisim jar> <circuit>  (make test runs it)
 
 set timeout 300
 
-# Start Logisim in headless mode
-spawn java -jar /Users/pavelgladyshev/git/logisim-evolution-ucd/build/libs/logisim-evolution-ucd-4.0.6-all.jar computer.circ -t tty
+# Start Logisim in text mode, with the jar and the circuit that make test gives
+if {$argc != 2} { puts "usage: test_fork.sh <Logisim jar> <circuit>"; exit 1 }
+spawn java -jar [lindex $argv 0] [lindex $argv 1] --tty raw
 
 # Wait for shell prompt
+set send_slow {1 0.03}
 expect {
     -re {\$\s} { }
     timeout { puts "FAIL: No shell prompt"; exit 1 }
@@ -128,6 +131,23 @@ expect {
     timeout { puts "FAIL: No prompt after exit"; exit 1 }
 }
 puts ">>> PASS: exit and shell restart"
+
+# Test 7: the ten test programs and /etc/test.sh, with their PASS and FAIL lines counted
+set passed 0
+set failed 0
+foreach cmd {fs_test pipe_test redir_test fd_test proc_test link_test shm_test sem_test script_test stress_test {sh /etc/test.sh}} {
+    send -s "$cmd\r"
+    expect {
+        -re {PASS|FAIL|\$\s$} {
+            if {$expect_out(0,string) eq "PASS"} { incr passed; exp_continue }
+            if {$expect_out(0,string) eq "FAIL"} { incr failed; exp_continue }
+        }
+        timeout { puts "FAIL: $cmd did not finish"; exit 1 }
+    }
+    puts ">>> $cmd: $passed PASS, $failed FAIL so far"
+}
+if {$failed > 0} { puts "FAIL: $failed of the tests failed"; exit 1 }
+puts ">>> PASS: the test programs and /etc/test.sh ($passed PASS, 0 FAIL)"
 
 puts "\n=== ALL TESTS PASSED ==="
 exit 0

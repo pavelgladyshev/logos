@@ -66,12 +66,12 @@ disable_interrupts:
     ret
 
 /*
- * uint32_t get_mcause(void)
+ * uint32_t get_cause(void)
  *
  * Return value of mcause register (reason for trap).
  */
-    .globl get_mcause
-get_mcause:
+    .globl get_cause
+get_cause:
     csrr a0, mcause
     ret
 
@@ -132,11 +132,11 @@ trap_handler:
     lw sp, 4(a0)
 
     /* Load address of C trap handler and call it with trap_frame pointer.
-     * Use jalr so c_trap_handler can return here (for sys_exit). */
+     * Use jalr so c_trap_handler can return here (when the shell exits). */
     lw t0, 8(a0)
     jalr ra, t0, 0
 
-    /* c_trap_handler returned - this happens when sys_exit is called.
+    /* c_trap_handler returned - this happens when a process with no parent exits.
      * Load the saved kernel context address and jump to restore_kernel_context */
     la t0, kernel_context
     lw t0, 0(t0)
@@ -207,7 +207,7 @@ trap_ret:
  *
  * a0 = pointer to trap_frame (set up for user program)
  *
- * Returns: 0 (actual exit code retrieved via syscall_get_exit_code)
+ * Returns: 0 (main() reads the exit code from the process table)
  */
     .globl run_user_program
 run_user_program:
@@ -258,7 +258,7 @@ restore_kernel_context:
     lw   ra,  60(sp)
     addi sp, sp, 64
 
-    /* Return 0 - actual exit code is retrieved via syscall_get_exit_code */
+    /* Return 0 - main() reads the exit code from the process table */
     li   a0, 0
     ret
 

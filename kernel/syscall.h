@@ -33,7 +33,7 @@ struct fd_entry {
 
 /*
  * Dispatch a system call based on trap frame contents.
- * Called from c_trap_handler when mcause indicates ecall.
+ * Called from c_trap_handler when the trap is an ecall.
  * Returns 1 if top-level program should exit, 0 otherwise.
  *
  * Note: sys_spawn and sys_exit may call trap_ret() directly

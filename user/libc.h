@@ -116,7 +116,7 @@ int pipe(int pipefd[2]);
 
 /* Directory entry structure (matches kernel's struct dirent) */
 struct dirent {
-    unsigned int inode;          /* Inode number (0 = entry is free) */
+    unsigned int inode;          /* Inode number (0xFFFFFFFF = entry is free) */
     char         name[MAX_FILENAME]; /* Filename (null-terminated) */
 };
 
@@ -139,10 +139,10 @@ struct proc_info {
 };
 
 /* List directory entries.
- * path: absolute path to directory
+ * path: path to directory
  * entries: buffer to receive directory entries
  * max_entries: maximum number of entries to return
- * Returns: number of entries read, or negative error
+ * Returns: number of entries in the directory (only the first max_entries are stored), or negative error
  */
 int readdir(const char *path, struct dirent *entries, int max_entries);
 

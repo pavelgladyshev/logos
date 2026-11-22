@@ -2,7 +2,8 @@
  * Linker script for relocatable (PIE) user programs
  * Licensed under Creative Commons Attribution International License 4.0
  *
- * Programs are linked at address 0 and relocated at load time.
+ * Programs are linked at address 0 and moved to their slot at load time;
+ * nothing in them is relocated.
  */
 
 OUTPUT_FORMAT("elf32-littleriscv", "elf32-littleriscv", "elf32-littleriscv")
@@ -11,7 +12,7 @@ ENTRY(_start)
 
 SECTIONS
 {
-    /* Start at address 0 - will be relocated at load time */
+    /* Start at address 0 - the loader moves the program to its slot */
     . = 0;
 
     .text : {

@@ -28,6 +28,10 @@ void boot_main(void)
         boot_puts("BOOT: Invalid filesystem magic\n");
         boot_halt();
     }
+    if (sb.version != FS_VERSION) {
+        boot_puts("BOOT: Wrong filesystem version\n");
+        boot_halt();
+    }
 
     boot_puts("BOOT: Filesystem found\n");
 
@@ -89,6 +93,34 @@ void boot_main(void)
 
             dst += BLOCK_SIZE;
             loaded += chunk;
+        }
+        /* Load indirect blocks if needed */
+        if (loaded < file_size && kernel_in.indirect != 0) {
+            static uint16_t ind_entries[BLOCK_SIZE / sizeof(uint16_t)];
+            int i;
+
+            if (boot_block_read(kernel_in.indirect, ind_entries) != 0) {
+                boot_puts("BOOT: Failed to read indirect block\n");
+                boot_halt();
+            }
+            for (i = 0; i < (int)(BLOCK_SIZE / sizeof(uint16_t)) && loaded < file_size; i++) {
+                uint32_t chunk;
+
+                if (ind_entries[i] == 0)
+                    break;
+
+                chunk = file_size - loaded;
+                if (chunk > BLOCK_SIZE)
+                    chunk = BLOCK_SIZE;
+
+                if (boot_block_read(ind_entries[i], dst) != 0) {
+                    boot_puts("BOOT: Failed to read kernel block\n");
+                    boot_halt();
+                }
+
+                dst += BLOCK_SIZE;
+                loaded += chunk;
+            }
         }
     }
 

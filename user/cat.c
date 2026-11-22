@@ -33,6 +33,7 @@ int main(int argc, char *argv[])
     while (1) {
         n = read(fd, buf, sizeof(buf));
         if (n <= 0) break;  /* EOF or error */
+        /* LIMITATIONS.md K13: the result of write is ignored */
         write(STDOUT_FILENO, buf, n);
     }
 

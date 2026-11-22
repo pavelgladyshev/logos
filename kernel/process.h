@@ -2,7 +2,7 @@
  * Process management for LOGOS kernel
  * Licensed under Creative Commons Attribution International License 4.0
  *
- * Each process gets a fixed 32KB memory slot and its own trap frame,
+ * Each process gets a fixed 64KB memory slot and its own trap frame,
  * file descriptors, environment, and PID.
  */
 
@@ -24,6 +24,7 @@
 #define SLEEP_NONE    0   /* Not sleeping */
 #define SLEEP_CHILD   1   /* spawn(): waiting for specific child to exit */
 #define SLEEP_WAIT    2   /* wait(): waiting for any child to exit */
+/* LIMITATIONS.md K4: no sleep(n) yet; SLEEP_TIMER is unused */
 #define SLEEP_TIMER   3   /* future: sleep(n) — waiting for timer */
 #define SLEEP_IO      4   /* read from an empty pipe, or write to a full one */
 #define SLEEP_SEM     5   /* Blocked on semaphore wait */
@@ -31,8 +32,8 @@
 /* Process table limits */
 #define MAX_PROCS       8
 
-/* Memory layout: 32KB fixed slots starting after kernel BSS */
-#define PROC_SLOT_SIZE  0x8000      /* 32KB per process */
+/* Memory layout: 64KB fixed slots starting after kernel BSS */
+#define PROC_SLOT_SIZE  0x10000     /* 64KB per process */
 #define PROC_MEM_START  0x00110000  /* First slot base address */
 
 /* Compute addresses for slot n */
@@ -47,6 +48,7 @@ struct process {
     int              exit_code;    /* Exit status */
     int              sleep_reason; /* Why sleeping (SLEEP_CHILD, SLEEP_WAIT, etc.) */
     int              sleep_chan;    /* Sleep context: child slot, wake time, device, etc. */
+    /* LIMITATIONS.md K15: mstatus is not saved for each process */
     trap_frame_t     tf;           /* Saved CPU registers (144 bytes) */
     uint32_t         mem_base;     /* Start of memory slot */
     uint32_t         stack_top;    /* Top of stack within slot */
@@ -121,7 +123,8 @@ void timer_init(void);
 
 /*
  * Round-robin scheduler — select next PROC_READY process and switch to it.
- * Sets selected process to PROC_RUNNING. Never returns (calls trap_ret).
+ * Sets selected process to PROC_RUNNING and does not return (calls trap_ret).
+ * Returns only if no process is PROC_READY.
  * Caller must set outgoing process state before calling.
  */
 void schedule(void);

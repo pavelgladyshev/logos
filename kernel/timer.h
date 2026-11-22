@@ -18,6 +18,7 @@
 #define TIMER_MTIME_ADDR     0x200bff8
 #define TIMER_MTIMECMP_ADDR  0x2004000
 
+/* LIMITATIONS.md K10: one quantum for every process */
 /* Timer tick interval (in timer cycles) */
 #define TIME_SLICE           800
 

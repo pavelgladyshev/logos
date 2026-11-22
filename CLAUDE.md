@@ -14,7 +14,9 @@ A bare-metal Unix-like OS for RISC-V, designed to run on a simulated RISC-V comp
 make                      # Build bootloader ROM image (boot-rom.txt)
 make all                  # Build everything: boot-rom.txt, kernel.bin, user programs, filesystem image
 make run                  # LogOS in Logisim's text mode (--tty raw); makes block_storage.bin only if missing
-make gui                  # computer.circ in Logisim's window (on WSL: Java for Windows if on PATH, else WSLg)
+make gui                  # computer-rom.circ in Logisim's window (on WSL: Java for Windows if on PATH, else WSLg)
+make check-rom            # computer.circ's ROM is empty, computer-rom.circ's holds boot-rom.txt (mkcircuit.py writes it)
+make test                 # Fresh disk, then test_fork.sh (needs expect): fork, pipes, the ten test programs, test.sh
 make logisim              # Fetch logisim-evolution-ucd-$(LOGISIM_VERSION)-all.jar from the releases
 make fstool               # Build native fstool utility for host system
 make logosfs              # Build fstool/logosfs, the FUSE driver (needs macFUSE or libfuse3)
@@ -59,7 +61,7 @@ truncating first, so `lfs_open` truncates as `sys_open` does.
 
 ```bash
 # Logisim (requires Java and Logisim Evolution)
-java -jar ~/logisim-evolution-ucd-5.0.9-all.jar computer.circ -t tty
+java -jar ~/logisim-evolution-ucd-5.0.10-all.jar computer-rom.circ --tty raw
 
 # Debugging: Logisim's CPU has a GDB server
 make debug                # LogOS in text mode, CPU waiting for gdb on port 3333
@@ -68,7 +70,7 @@ make openocd              # Tang Nano 20K, CPU with Debug Enable: OpenOCD (fpga/
 make fpga-gdb             # in another terminal: gdb to OpenOCD, port 3334
 ```
 
-Note: Before running Logisim without GUI, you must first load the bootloader ROM image (`boot-rom.txt`) into the ROM component and the filesystem image (`block_storage.bin`) into the block device via the GUI, then save the circuit.
+Note: the ROM of `computer.circ` is empty. `make run`, `gui` and `debug` run a copy, `computer-rom.circ` (`computer-gdb.circ` for `make debug`), with `boot-rom.txt` in its ROM (`mkcircuit.py` writes it); the Block Storage reads `block_storage.bin` beside the circuit.
 
 ## Architecture
 
@@ -94,7 +96,7 @@ Key modules organized by directory:
 | Shared Memory | `shm.c/h` | Fixed-size (4KB) shared memory segments, key-based API |
 | Semaphores | `sem.c/h` | Counting semaphores with ecall-retry blocking |
 | System Calls | `syscall.c/h`, `syscall_nr.h` | Syscall dispatch, per-process file descriptors |
-| ELF Loader | `loader.c/h`, `loader_asm.S`, `elf.h` | Load ELF programs at arbitrary addresses |
+| ELF Loader | `loader.c/h`, `elf.h` | Load ELF programs at arbitrary addresses |
 | Kernel Entry | `crt0.S`, `kernel.lds` | Kernel entry point (in RAM), kernel linker script |
 | Kernel Main | `main.c` | Kernel initialization and shell restart loop |
 | **User** (`user/`) | | |
@@ -107,7 +109,7 @@ Key modules organized by directory:
 | FUSE Driver | `logosfs.c` | Mounts a filesystem image on the host (macFUSE/FSKit, Linux FUSE) |
 
 **Filesystem Layout (1024 blocks × 512 bytes):**
-- Block 0: Superblock (magic `FS_MAGIC`, layout version `FS_VERSION` = 2, counts); `fs_mount()`
+- Block 0: Superblock (magic `FS_MAGIC`, layout version `FS_VERSION` = 3, counts); `fs_mount()`
   refuses another version (`FS_ERR_VERSION`), so old images need `make fs-image`. Bump
   `FS_VERSION` in `kernel/fs_types.h` whenever the on-disk layout changes
 - Block 1: Block allocation bitmap
@@ -117,19 +119,19 @@ Key modules organized by directory:
 **Memory Layout (Logisim):**
 - 0x00000000-0x0000FFFF: ROM (64KB) — bootloader code (`boot_crt0.S` + `boot_main.c`)
 - 0x00100000-0x0010FFFF: RAM — kernel code/data/BSS (loaded by bootloader from `/boot/kernel`)
-- 0x00110000-0x0014FFFF: Process memory slots (8 × 32KB)
-  - Slot 0: 0x00110000-0x00117FFF (shell)
-  - Slot 1: 0x00118000-0x0011FFFF
+- 0x00110000-0x0018FFFF: Process memory slots (8 × 64KB)
+  - Slot 0: 0x00110000-0x0011FFFF (shell)
+  - Slot 1: 0x00120000-0x0012FFFF
   - ...
-  - Slot 7: 0x00148000-0x0014FFFF
-- 0x00150000-0x00157FFF: Shared memory segments (8 × 4KB)
+  - Slot 7: 0x00180000-0x0018FFFF
+- 0x00190000-0x00197FFF: Shared memory segments (8 × 4KB)
 - 0x001F0000-0x001FEFFF: Bootloader BSS (60KB, used only during boot)
 - 0x001FFFFC: Initial stack pointer (shared by bootloader and kernel)
 - 0x00200000: Block device MMIO
 - 0xFFFF0004/0008: Console input MMIO (receiver control/data)
 - 0xFFFF000C: Console output MMIO
 
-Each 32KB slot holds code + data + BSS + stack (stack grows down from slot top - 0x100).
+Each 64KB slot holds code + data + BSS + stack (stack grows down from slot top - 0x100).
 
 ## Boot Process
 
@@ -235,7 +237,7 @@ User programs communicate with the kernel via the `ecall` instruction. The sysca
 
 ## Process Model
 
-Each program runs in its own fixed 32KB memory slot with a per-process trap frame, file descriptors, and PID. Preemptive multitasking via timer interrupt (round-robin scheduling).
+Each program runs in its own fixed 64KB memory slot with a per-process trap frame, file descriptors, and PID. Preemptive multitasking via timer interrupt (round-robin scheduling).
 
 **Process states:**
 - `PROC_FREE` (0) — slot available
@@ -252,7 +254,7 @@ Each program runs in its own fixed 32KB memory slot with a per-process trap fram
 - `SLEEP_IO` (4) — blocked on pipe read/write
 - `SLEEP_SEM` (5) — blocked on semaphore wait
 
-**fork() semantics:** `fork()` copies the parent's entire 32KB memory slot to a new slot, duplicates all file descriptors (incrementing pipe reference counts), copies the environment, and adjusts the child's registers by the memory offset delta. Returns child PID to parent, 0 to child.
+**fork() semantics:** `fork()` copies the parent's entire 64KB memory slot to a new slot, duplicates all file descriptors (incrementing pipe reference counts), copies the environment, and adjusts the child's registers by the memory offset delta. Returns child PID to parent, 0 to child.
 
 **exec() semantics:** `exec()` replaces the current process image with a new program. File descriptors are preserved across exec (important for pipe redirection via fork+dup2+exec). Environment is preserved unless envp is non-NULL.
 
@@ -260,7 +262,7 @@ Each program runs in its own fixed 32KB memory slot with a per-process trap fram
 
 **spawn() semantics:** `spawn()` combines fork+exec+wait in a single syscall (legacy). Loads the child into a new slot, parent sleeps until child exits.
 
-**Pipes:** Kernel-buffered IPC channels (256-byte circular buffer, max 8 pipes). Created via `pipe()`, integrated with `read()/write()/close()/dup()/dup2()/fork()`. Blocking uses ecall-retry: when a pipe operation would block, the process sleeps without advancing mepc past the ecall instruction; when woken, the ecall re-executes and retries the operation. Reference counting tracks open read/write ends independently. EOF is returned when all write ends are closed; EPIPE when all read ends are closed.
+**Pipes:** Kernel-buffered IPC channels (512-byte circular buffer, max 8 pipes). Created via `pipe()`, integrated with `read()/write()/close()/dup()/dup2()/fork()`. Blocking uses ecall-retry: when a pipe operation would block, the process sleeps without advancing mepc past the ecall instruction; when woken, the ecall re-executes and retries the operation. Reference counting tracks open read/write ends independently. EOF is returned when all write ends are closed; EPIPE when all read ends are closed.
 
 **Context switching:** The scheduler uses round-robin with timer interrupts. `sys_fork`, `sys_exec`, `sys_exit`, and blocking pipe operations call `schedule()` which selects the next PROC_READY process and switches to it via `trap_ret()`.
 
@@ -422,7 +424,7 @@ Update the `RISCV_TOOL_PREFIX` variable in the Makefile if your toolchain is in 
 - **Logisim**: RV32IM_Zicsr, ILP32 ABI
   - Bootloader: `boot/boot.lds` (ROM at 0x0, BSS at 0x001F0000)
   - Kernel: `kernel/kernel.lds` (loaded at 0x00100000)
-  - User programs: `user/user.lds` (linked at address 0, relocated at load time)
+  - User programs: `user/user.lds` (linked at address 0, moved to its slot at load time)
 - The `zicsr` extension is required for CSR instructions used in trap handling
 
 ## Known PIE Limitations

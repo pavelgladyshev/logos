@@ -38,7 +38,7 @@ paste all of the output when you ask for help. What it installs, to do it by han
 - macOS: `brew install riscv64-elf-gcc`, and Java 21 or later (`brew install --cask temurin@21`).
 - Ubuntu, Debian, WSL: `sudo apt install build-essential git curl pkg-config fuse3 libfuse3-dev
   gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf openjdk-21-jre`.
-- Logisim Evolution UCD 5.0.9 or later: `make logisim` fetches its jar from the
+- Logisim Evolution UCD 5.0.10 or later: `make logisim` fetches its jar from the
   [releases](https://github.com/pavelgladyshev/logisim-evolution-ucd/releases).
 
 The Makefile finds the RISC-V compiler itself (Homebrew's or Ubuntu's); another one:
@@ -64,7 +64,7 @@ This builds:
 make run
 ```
 
-runs LogOS in Logisim's text mode (`java -jar logisim-evolution-ucd-5.0.9-all.jar computer.circ --tty raw`):
+runs LogOS in Logisim's text mode (`java -jar logisim-evolution-ucd-5.0.10-all.jar computer-rom.circ --tty raw`):
 the terminal is the computer's console, and the simulation runs much faster than in Logisim's
 window. Ctrl-C stops it. (`make run` makes `block_storage.bin` only when there is none.) You should
 see the bootloader load the kernel, and the shell's prompt:
@@ -76,7 +76,7 @@ BOOT: Found kernel at inode 4
 BOOT: Jumping to kernel at 0x100000
 
 logOS Blackrock
-Version 2.1.3
+Version 2.2.0
 
 Mounting filesystem...
 Filesystem mounted.
@@ -88,13 +88,19 @@ Welcome to logOS!
 /$ _
 ```
 
-`make gui` opens `computer.circ` in Logisim's window. On Windows the window comes through WSLg,
+`make gui` opens the same circuit in Logisim's window. On Windows the window comes through WSLg,
 with plainer graphics and more slowly; with Java for Windows installed and on the PATH (for
 example [Temurin 21](https://adoptium.net)), `make gui` uses it instead, for a native window and
 the FPGA board's USB.
 
-`computer.circ` holds the bootloader in its ROM. After changing the bootloader (`boot/`), load
-`boot-rom.txt` into the ROM in Logisim's window and save the circuit.
+The ROM of `computer.circ` is empty. `make run`, `make gui` and `make debug` run a copy of the
+circuit (`computer-rom.circ`, and `computer-gdb.circ` for `make debug`) with the bootloader that
+`boot-rom.txt` holds in its ROM; `mkcircuit.py` makes the copy again whenever the bootloader
+(`boot/`) has changed. `make check-rom` checks both ROMs.
+
+`make test` boots LogOS on a fresh disk image and runs `test_fork.sh`: fork, pipes, the shell's
+restart, the ten test programs and `sh /etc/test.sh`, with their PASS and FAIL lines counted. It
+needs `expect` (`sudo apt install expect`), and ends with `=== ALL TESTS PASSED ===`.
 
 ### Debugging with gdb
 
@@ -169,13 +175,13 @@ ROM (64KB)                    RAM
 |  boot_main.c)     |        +-------------------+ 0x0010FFFF
 +-------------------+        +-------------------+ 0x00110000
   0x00000000                 | Process Slot 0    | <- shell
-                              | (32KB)            |
-                              +-------------------+ 0x00118000
+                              | (64KB)            |
+                              +-------------------+ 0x00120000
                               | Process Slot 1    |
-                              | (32KB)            |
+                              | (64KB)            |
                               +-------------------+
                               | ...               |
-                              +-------------------+ 0x0014FFFF
+                              +-------------------+ 0x0018FFFF
                               | Process Slot 7    |
                               +-------------------+
 
@@ -196,7 +202,7 @@ Inode-based filesystem (1024 blocks x 512 bytes):
 - Subsequent blocks: Inode table (64 inodes x 128 bytes each)
 - Remaining blocks: Data
 
-The superblock's version (`FS_VERSION` in `kernel/fs_types.h`, 2 for this layout) changes
+The superblock's version (`FS_VERSION` in `kernel/fs_types.h`, 3 for this layout) changes
 whenever the layout does. The kernel, `fstool` and `logosfs` all refuse a disk of another
 version, so a disk image made by an older LogOS has to be made again: `make fs-image`.
 
@@ -242,7 +248,7 @@ umount mnt                                                  # on Linux: fusermou
 Unmount before booting the image in Logisim or writing it to an SD card. LogOS keeps no owners,
 permissions, times or extended attributes: logosfs shows your user, the image file's time and fixed
 permissions, and drops changes to them. Names have at most 27 characters, and a file at most
-30,720 bytes (60 direct blocks).
+161,280 bytes (59 direct blocks and 256 through its indirect block).
 
 On macOS with FSKit, `ln` makes the hard link but reports an I/O error all the same (macFUSE's
 FSKit backend wants a hard link to come back as the original's node, which FUSE's path-based
@@ -320,12 +326,12 @@ Programs use `ecall` with the syscall number in `a7` and arguments in `a0`-`a5`:
 
 ### Process Model
 
-- 8 fixed 32KB memory slots, each holding one program
+- 8 fixed 64KB memory slots, each holding one program
 - Preemptive multitasking with timer-driven round-robin scheduling
-- `fork()` copies the parent's 32KB slot to a new slot, duplicates file descriptors and environment
+- `fork()` copies the parent's 64KB slot to a new slot, duplicates file descriptors and environment
 - `exec()` replaces the process image, preserving file descriptors (important for pipe redirection)
 - `wait()` blocks until a child exits and returns its exit code
-- Kernel-buffered pipes (256-byte circular buffer, max 8 pipes) with blocking I/O and reference counting
+- Kernel-buffered pipes (512-byte circular buffer, max 8 pipes) with blocking I/O and reference counting
 - Per-process file descriptors, environment variables, and working directory
 - Process states: FREE, READY, RUNNING, SLEEPING, ZOMBIE
 
@@ -360,7 +366,8 @@ Programs are compiled as position-independent executables (PIE) and loaded at ar
 | `kernel/` | Kernel — filesystem, process management, syscalls, trap handling, ELF loader, pipes |
 | `user/` | User space — libc, shell, and utility programs |
 | `fstool/` | Host tools: `fstool` builds filesystem images, `logosfs` mounts them (FUSE) |
-| `textbook/` | Course materials |
+
+`LIMITATIONS.md` lists what this version does not do, on purpose: each entry is a shortcoming that an exercise of the book depends on, so please do not repair them here.
 
 ## License
 

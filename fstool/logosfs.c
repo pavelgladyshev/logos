@@ -34,7 +34,7 @@
 #include "fs_globals.h"
 #include "native_block.h"
 
-#define MAX_FILE_SIZE  ((off_t)DIRECT_BLOCKS * BLOCK_SIZE)
+#define MAX_FILE_SIZE  ((off_t)(DIRECT_BLOCKS + INDIRECT_ENTRIES) * BLOCK_SIZE)
 #define MAX_DIRENTS    (DIRECT_BLOCKS * DIRENTS_PER_BLOCK)
 
 static time_t image_time;    /* LogOS keeps no times: every file shows the image file's */

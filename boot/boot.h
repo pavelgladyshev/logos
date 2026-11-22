@@ -26,12 +26,9 @@ void boot_halt(void);
 /* Boot filesystem functions */
 int boot_resolve_path(const char *path, struct superblock *sb,
                       uint8_t *buf, uint32_t *result_ino);
-int boot_file_read(uint32_t ino, struct superblock *sb, uint8_t *buf,
-                   uint32_t offset, void *dst, uint32_t len);
 
 /* Boot string/memory utilities */
 void boot_memcpy(void *dst, const void *src, uint32_t n);
-void boot_memset(void *dst, int c, uint32_t n);
 int  boot_strcmp(const char *s1, const char *s2);
 
 #endif /* BOOT_H */

@@ -82,6 +82,7 @@ void sem_dup(int sem_idx) {
     }
 }
 
+/* LIMITATIONS.md K8: wakes every sleeper on the semaphore */
 void sem_wakeup(int sem_idx) {
     int i;
     for (i = 0; i < MAX_PROCS; i++) {

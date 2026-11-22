@@ -88,7 +88,7 @@ if [ "$IS_OBJECT" = "1" ]; then
 
     if [ -n "$BAD_RELOCS" ]; then
         # Check for R_RISCV_32 relocations (absolute 32-bit addresses)
-        R32_COUNT=$($READELF -r "$FILE" 2>/dev/null | grep "R_RISCV_32" | wc -l | tr -d ' ')
+        R32_COUNT=$($READELF -r "$FILE" 2>/dev/null | awk '/^Relocation section/ { d = ($0 ~ /\.rela\.s?data/) } d && /R_RISCV_32/ { n++ } END { print n+0 }')
 
         if [ "$R32_COUNT" -gt 0 ]; then
             echo "ERROR: Found $R32_COUNT R_RISCV_32 relocations in data sections"

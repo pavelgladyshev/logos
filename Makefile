@@ -13,7 +13,8 @@
 #
 #   make all        bootloader ROM image and a fresh disk image (block_storage.bin)
 #   make run        LogOS in Logisim's text mode, the fast way (Ctrl-C stops it)
-#   make gui        computer.circ in Logisim's window
+#   make gui        LogOS in Logisim's window
+#   make test       the test programs, in Logisim's text mode (needs expect)
 #   make logosfs    the FUSE driver that mounts block_storage.bin on your computer
 #   make openocd    OpenOCD for the CPU on a Tang Nano 20K (Debug Enable); then make fpga-gdb
 
@@ -89,7 +90,7 @@ boot-rom.txt: boot-rom
 KERNEL_OBJS = kernel/crt0.o kernel/string.o kernel/console.o kernel/block.o \
               kernel/inode.o kernel/dir.o kernel/file.o kernel/fs.o \
               kernel/device.o kernel/console_dev.o kernel/loader.o \
-              kernel/loader_asm.o kernel/trap.o kernel/process.o \
+              kernel/trap.o kernel/process.o \
               kernel/pipe.o kernel/shm.o kernel/sem.o kernel/syscall.o kernel/main.o
 
 KERNEL_HEADERS = kernel/fs.h kernel/types.h kernel/fs_types.h kernel/string.h \
@@ -252,8 +253,8 @@ all: boot-rom.txt fs-image
 # ====================================
 
 # Logisim Evolution UCD, fetched from its releases (make logisim; setup.sh does it).
-# Another one: make run LOGISIM_JAR=/its/path/logisim-evolution-ucd-5.0.9-all.jar
-LOGISIM_VERSION = 5.0.9
+# Another one: make run LOGISIM_JAR=/its/path/logisim-evolution-ucd-5.0.10-all.jar
+LOGISIM_VERSION = 5.0.10
 LOGISIM_JAR = logisim-evolution-ucd-$(LOGISIM_VERSION)-all.jar
 LOGISIM_URL = https://github.com/pavelgladyshev/logisim-evolution-ucd/releases/download/v$(LOGISIM_VERSION)/logisim-evolution-ucd-$(LOGISIM_VERSION)-all.jar
 
@@ -262,19 +263,26 @@ logisim: $(LOGISIM_JAR)
 $(LOGISIM_JAR):
 	curl -fL --progress-bar -o $@.part $(LOGISIM_URL) && mv $@.part $@
 
+# The ROM of computer.circ is empty. LogOS runs in a copy of the circuit with the bootloader that
+# boot-rom.txt holds in its ROM (mkcircuit.py writes it), made again whenever boot-rom.txt changes
+PYTHON ?= python3
+
+computer-rom.circ: computer.circ boot-rom.txt mkcircuit.py
+	$(PYTHON) mkcircuit.py computer.circ $@ --rom boot-rom.txt
+
 # Text mode: the TTY is this terminal, and the simulation runs much faster than in the window.
 # The disk image is made only if there is none (make fs-image makes a fresh one, without the
 # files you added since)
-run: $(LOGISIM_JAR) block_storage.bin
-	java -jar $(LOGISIM_JAR) computer.circ --tty raw
+run: $(LOGISIM_JAR) block_storage.bin computer-rom.circ
+	java -jar $(LOGISIM_JAR) computer-rom.circ --tty raw
 
 block_storage.bin:
 	$(MAKE) fs-image
 
 # The window. On Windows (WSL), Java for Windows, when it is on the PATH, gives a native window
 # and the FPGA board's USB; without it, Linux's Java shows the window through WSLg
-gui: $(LOGISIM_JAR)
-	$(if $(shell command -v javaw.exe),javaw.exe,java) -jar $(LOGISIM_JAR) computer.circ
+gui: $(LOGISIM_JAR) computer-rom.circ
+	$(if $(shell command -v javaw.exe),javaw.exe,java) -jar $(LOGISIM_JAR) computer-rom.circ
 
 # The debugger. Logisim's RV32IM CPU has a GDB server. make debug starts LogOS in text mode with
 # the server switched on, in a copy of the circuit, and the CPU waits for a debugger; make gdb,
@@ -282,14 +290,16 @@ gui: $(LOGISIM_JAR)
 # continue). Another gdb: make gdb GDB=/its/path/riscv64-elf-gdb
 GDB ?= $(or $(shell command -v gdb-multiarch),$(shell command -v riscv64-elf-gdb),$(shell command -v riscv64-unknown-elf-gdb),gdb)
 
-computer-gdb.circ: computer.circ
-	sed 's|\(name="RV32IM CPU">\)|\1<a name="gdbServerRunning" val="true"/><a name="tcpPort" val="$(GDB_PORT)"/>|' computer.circ > $@
+computer-gdb.circ: computer.circ boot-rom.txt mkcircuit.py
+	$(PYTHON) mkcircuit.py computer.circ $@ --rom boot-rom.txt --debug $(GDB_PORT)
 
 debug: $(LOGISIM_JAR) block_storage.bin computer-gdb.circ
 	java -jar $(LOGISIM_JAR) computer-gdb.circ --tty raw
 
+# gdb must be told that the program is bare metal (osabi none): otherwise it takes it for a
+# Linux program and steps by planting a breakpoint after the instruction, which fails at mret.
 gdb: $(BUILD_DIR)/kernel-debug.elf
-	$(GDB) -q -ex 'set architecture riscv:rv32' -ex 'target remote localhost:$(GDB_PORT)' $(BUILD_DIR)/kernel-debug.elf
+	$(GDB) -q -ex 'set architecture riscv:rv32' -ex 'set osabi none' -ex 'target remote localhost:$(GDB_PORT)' $(BUILD_DIR)/kernel-debug.elf
 
 # LogOS on a Tang Nano 20K: with the CPU's attribute Debug Enable set before the download, the CPU
 # on the FPGA has a debug module on the board's JTAG port. make openocd connects OpenOCD to it
@@ -302,6 +312,44 @@ openocd:
 
 fpga-gdb:
 	$(MAKE) gdb GDB_PORT=$(FPGA_GDB_PORT)
+
+# make check-rom: the ROM of computer.circ is empty, and the ROM of computer-rom.circ holds the
+# words of boot-rom.txt, no more and no fewer (the zeros at the end of the ROM do not count)
+define CHECK_ROM
+import re, sys
+def rom(circuit):
+    for comp in re.findall(r'<comp [^>]*name="ROM">(.*?)</comp>', open(circuit).read(), re.S):
+        if '<a name="label" val="ROM_1"/>' in comp:
+            rows = re.search(r'<a name="contents">addr/data: \d+ \d+(.*?)</a>', comp, re.S).group(1)
+            words = []
+            for word in rows.split():
+                count, star, value = word.rpartition('*')
+                words += [int(value, 16)] * int(count or 1)
+            return trimmed(words)
+    sys.exit('check-rom: there is no ROM labelled ROM_1 in ' + circuit)
+def trimmed(words):
+    while words and words[-1] == 0:
+        words = words[:-1]
+    return words
+circuit, copy, image = sys.argv[1:]
+if rom(circuit):
+    sys.exit('check-rom: the ROM of %s is not empty' % circuit)
+words = trimmed([int(word, 16) for word in open(image).read().split()[2:]])
+if rom(copy) != words:
+    sys.exit('check-rom: the ROM of %s is not the bootloader in %s (make it again: rm %s)' % (copy, image, copy))
+print('check-rom: the ROM of %s is empty; the ROM of %s holds the %d words of %s' % (circuit, copy, len(words), image))
+endef
+export CHECK_ROM
+
+check-rom: computer-rom.circ
+	@$(PYTHON) -c "$$CHECK_ROM" computer.circ computer-rom.circ boot-rom.txt
+
+# make test: a fresh disk image, then test_fork.sh in Logisim's text mode: fork, exec and wait,
+# pipes, the shell's restart, the ten test programs and /etc/test.sh, with their PASS and FAIL
+# lines counted. It needs expect (Ubuntu, Debian, WSL: sudo apt install expect)
+test: $(LOGISIM_JAR) all computer-rom.circ check-rom
+	@command -v expect > /dev/null || { echo "make test needs expect: sudo apt install expect (Ubuntu, Debian, WSL)"; exit 1; }
+	expect -f test_fork.sh $(LOGISIM_JAR) computer-rom.circ
 
 # make print-VARIABLE: a variable's value (setup.sh asks for RISCV_TOOL_PREFIX and LOGISIM_JAR)
 print-%:
@@ -327,7 +375,8 @@ clean: clean-boot clean-kernel
 
 clean-all: clean clean-user clean-fstool
 	rm -rf $(BUILD_DIR)
-	rm -f boot-rom boot-rom.txt block_storage.bin
+	rm -f boot-rom boot-rom.txt block_storage.bin computer-rom.circ computer-gdb.circ
 
 .PHONY: all clean clean-all clean-boot clean-kernel clean-user clean-fstool logosfs \
-        fs-image fstool user-programs check-pie logisim run gui debug gdb openocd fpga-gdb
+        fs-image user-programs check-pie logisim run gui debug gdb openocd fpga-gdb \
+        check-rom test

@@ -361,7 +361,9 @@ static void cmd_set(int argc, char *argv[])
             continue;
         }
         *eq = '\0';
-        setenv(argv[i], eq + 1);
+        if (setenv(argv[i], eq + 1) < 0) {
+            printf("set: %s: cannot set\n", argv[i]);
+        }
         *eq = '=';
     }
 }
@@ -668,9 +670,9 @@ static int collect_block_from_array(char src[][MAX_CMD_LEN], int src_count, int 
  * keeps the compiler from merging them back into execute_block.  Each one
  * declares 2-4 KB of line buffers; in a single function they all occupied
  * every frame (4.4 KB), so a nested block such as an if inside a while
- * needed ~19 KB of stack and overran the shell's ~16 KB, overwriting its
- * code.  Now a frame holds only the buffers of the construct it runs, and
- * an if keeps only the branch that will run.
+ * needed ~19 KB of stack and overran the ~16 KB that the shell's stack had
+ * in a 32 KB slot, overwriting its code.  Now a frame holds only the buffers
+ * of the construct it runs, and an if keeps only the branch that will run.
  * Each helper is called with lines[i] at its keyword and returns the index
  * of the first line after the construct.
  */

@@ -21,5 +21,8 @@ SECTIONS
 
   _end = .;
 
+  /* The kernel has the 64KB below the first process slot (PROC_MEM_START in process.h) */
+  ASSERT(_end <= 0x00110000, "kernel too large: it must end below the first process slot at 0x00110000")
+
   PROVIDE(__stack_init = 0x001FFFFC);
 }

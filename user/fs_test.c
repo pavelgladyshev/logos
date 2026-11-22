@@ -274,6 +274,47 @@ static void test_open_noent(void) {
     pass("open noent");
 }
 
+/* Test 13: a file larger than the direct blocks */
+static void test_past_direct(void) {
+    int fd, i, j, n;
+    char buf[512];
+    struct stat_info si;
+
+    printf("\n--- Test 13: file past the direct blocks ---\n");
+
+    fd = open("/tmp_big.bin", O_WRONLY | O_CREAT | O_TRUNC);
+    if (fd < 0) { fail("file past the direct blocks", "create failed"); return; }
+
+    /* Write 80 blocks (40KB), each filled with a byte that depends on its number */
+    for (i = 0; i < 80; i++) {
+        for (j = 0; j < 512; j++) buf[j] = (char)(i * 3 + 1);
+        n = write(fd, buf, 512);
+        if (n != 512) { fail("file past the direct blocks", "write failed"); close(fd); unlink("/tmp_big.bin"); return; }
+    }
+    close(fd);
+
+    if (stat("/tmp_big.bin", &si) < 0) { fail("file past the direct blocks", "stat failed"); unlink("/tmp_big.bin"); return; }
+    if (si.size != 40960) { fail("file past the direct blocks", "wrong size"); unlink("/tmp_big.bin"); return; }
+
+    /* Read back block by block and compare */
+    fd = open("/tmp_big.bin", O_RDONLY);
+    if (fd < 0) { fail("file past the direct blocks", "open for read failed"); unlink("/tmp_big.bin"); return; }
+    for (i = 0; i < 80; i++) {
+        n = read(fd, buf, 512);
+        if (n != 512) { fail("file past the direct blocks", "read failed"); close(fd); unlink("/tmp_big.bin"); return; }
+        for (j = 0; j < 512; j++) {
+            if (buf[j] != (char)(i * 3 + 1)) { fail("file past the direct blocks", "content mismatch"); close(fd); unlink("/tmp_big.bin"); return; }
+        }
+    }
+
+    n = read(fd, buf, 512);  /* Should return 0 (EOF) */
+    close(fd);
+    if (n != 0) { fail("file past the direct blocks", "expected 0 at EOF"); unlink("/tmp_big.bin"); return; }
+
+    unlink("/tmp_big.bin");
+    pass("file past the direct blocks");
+}
+
 int main(void) {
     printf("=== Filesystem Tests ===\n");
 
@@ -289,6 +330,7 @@ int main(void) {
     test_rmdir_notempty();
     test_chdir_relative();
     test_open_noent();
+    test_past_direct();
 
     print_test_results();
     return tests_failed;

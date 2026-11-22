@@ -10,9 +10,6 @@
 #include "fs.h"
 #include "console.h"
 
-/* Assembly trampoline for executing loaded program */
-extern int elf_trampoline(uint32_t entry, uint32_t sp);
-
 /*
  * Validate ELF header
  * Returns LOAD_OK if valid, error code otherwise
@@ -223,6 +220,7 @@ int elf_load_at(const char *path, uint32_t load_addr, uint32_t max_size, struct 
         return LOAD_ERR_FORMAT;
     }
 
+    /* LIMITATIONS.md B14: the program is moved, nothing in it is relocated */
     /* Calculate load bias (difference between requested and linked address) */
     load_bias = load_addr - min_vaddr;
 
@@ -299,20 +297,4 @@ int elf_load_at(const char *path, uint32_t load_addr, uint32_t max_size, struct 
     }
 
     return LOAD_OK;
-}
-
-/*
- * Load an ELF executable at the default address
- */
-int elf_load(const char *path, struct program_info *info)
-{
-    return elf_load_at(path, PROGRAM_LOAD_ADDR, PROGRAM_MAX_SIZE, info);
-}
-
-/*
- * Execute a loaded program
- */
-int elf_exec(struct program_info *info)
-{
-    return elf_trampoline(info->entry_point, PROGRAM_STACK_TOP);
 }

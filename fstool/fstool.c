@@ -5,6 +5,7 @@
  * Usage:
  *   fstool format <blockfile> <num_blocks>   - Format with new filesystem
  *   fstool ls <blockfile> <path>             - List directory contents
+ *   fstool mkdir <blockfile> <path>          - Create directory
  *   fstool add <blockfile> <path> <hostfile> - Copy file into filesystem
  */
 
@@ -127,9 +128,6 @@ static int cmd_format(const char *blockfile, const char *num_blocks_str) {
 }
 
 /*
- * List directory command
- */
-/*
  * Mount the file system, saying what is wrong if it cannot be
  */
 static int mount_fs(void) {
@@ -143,6 +141,9 @@ static int mount_fs(void) {
     return result;
 }
 
+/*
+ * List directory command
+ */
 static int cmd_ls(const char *blockfile, const char *path) {
     if (native_backing_store_open(blockfile) != 0) {
         fprintf(stderr, "Error: Failed to open block file '%s'\n", blockfile);
@@ -180,7 +181,7 @@ static int cmd_ls(const char *blockfile, const char *path) {
 
     printf("Contents of '%s':\n", path);
 
-    for (uint32_t i = 0; i < count; i++) {
+    for (uint32_t i = 0; i < count && i < MAX_INODES; i++) {
         uint8_t type;
         uint32_t size;
         if (inode_get_type(entries[i].inode, &type) == FS_OK &&
@@ -249,8 +250,8 @@ static int cmd_add(const char *blockfile, const char *path, const char *hostfile
     long file_size = ftell(hf);
     fseek(hf, 0, SEEK_SET);
 
-    if (file_size > DIRECT_BLOCKS * BLOCK_SIZE) {
-        fprintf(stderr, "Error: File too large (max %d bytes)\n", DIRECT_BLOCKS * BLOCK_SIZE);
+    if (file_size > (long)(DIRECT_BLOCKS + INDIRECT_ENTRIES) * BLOCK_SIZE) {
+        fprintf(stderr, "Error: File too large (max %ld bytes)\n", (long)(DIRECT_BLOCKS + INDIRECT_ENTRIES) * BLOCK_SIZE);
         fclose(hf);
         return 1;
     }
@@ -308,8 +309,13 @@ static int cmd_add(const char *blockfile, const char *path, const char *hostfile
     /* Write content */
     if (file_size > 0) {
         result = file_write(file_ino, 0, content, file_size);
-        if (result < 0) {
-            fprintf(stderr, "Error: Failed to write file (code %d)\n", result);
+        if (result != file_size) {
+            if (result < 0) {
+                fprintf(stderr, "Error: Failed to write file (code %d)\n", result);
+            } else {
+                fprintf(stderr, "Error: Disk full: wrote %d of %ld bytes\n", result, file_size);
+            }
+            file_delete(parent_ino, filename);
             free(content);
             native_backing_store_close();
             return 1;
@@ -326,6 +332,7 @@ static int cmd_add(const char *blockfile, const char *path, const char *hostfile
 /*
  * Main entry point
  */
+/* LIMITATIONS.md B11: no rm and no ln */
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         print_usage(argv[0]);

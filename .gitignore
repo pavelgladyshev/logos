@@ -40,3 +40,4 @@ test.bin
 logisim-evolution-ucd-*-all.jar
 logisim-evolution-ucd-*-all.jar.part
 computer-gdb.circ
+computer-rom.circ

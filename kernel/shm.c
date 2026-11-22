@@ -36,6 +36,7 @@ int shm_get(int key, int flags) {
     /* Initialize segment */
     shm_table[free_slot].state = SHM_ACTIVE;
     shm_table[free_slot].key = key;
+    /* LIMITATIONS.md K11: no reference until shmat; never attached, never freed */
     shm_table[free_slot].refcount = 0;
     shm_table[free_slot].addr = SHM_BASE_ADDR + (free_slot * SHM_SEG_SIZE);
 

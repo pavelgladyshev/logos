@@ -16,6 +16,7 @@ static int console_read(uint8_t minor, void *buf, uint32_t len) {
 
     /* Line-buffered input with echo */
     while (i < len) {
+        /* LIMITATIONS.md K3: polls with interrupts off; nothing else runs */
         /* Poll for data available (bit 0 of RCR) */
         while ((CONSOLE_RCR & 1) == 0) {
             /* busy wait for keyboard input */
@@ -66,8 +67,6 @@ static int console_write(uint8_t minor, const void *buf, uint32_t len) {
 
 /* Console device operations - read/write terminal */
 static struct device_ops console_ops = {
-    .open  = 0,
-    .close = 0,
     .read  = console_read,
     .write = console_write
 };
