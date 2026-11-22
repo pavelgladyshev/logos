@@ -17,9 +17,6 @@
 #include "string.h"
 #include "process.h"
 
-/* Console minor device number */
-#define CONSOLE_MINOR  0
-
 /* Open flags (must match user/libc.h) */
 #define OPEN_CREAT   0x100
 #define OPEN_TRUNC   0x200
@@ -74,10 +71,11 @@ static int sys_exit(trap_frame_t *tf) {
         int parent_slot = cur->parent;
         struct process *parent = &proc_table[parent_slot];
 
+        /* LIMITATIONS.md B2: a negative status reads as a load error in the parent */
         /* Set parent's spawn() return value to child's exit code */
         parent->tf.a0 = (uint32_t)exit_status;
-        /* Advance parent's mepc past the ecall instruction */
-        parent->tf.mepc += 4;
+        /* Advance parent's epc past the ecall instruction */
+        parent->tf.epc += 4;
 
         /* Update process states */
         parent->state = PROC_RUNNING;
@@ -272,6 +270,7 @@ static int resolve_path(const char *path, char *abs_path, int abs_size) {
  */
 static int32_t sys_open(trap_frame_t *tf) {
     const char *path = (const char *)tf->a0;
+    /* LIMITATIONS.md B1: the access mode in flags is ignored */
     uint32_t flags = tf->a1;
     char resolved[MAX_ARG_LEN];
     uint32_t ino;
@@ -499,7 +498,7 @@ static int32_t sys_spawn(trap_frame_t *tf) {
     /* Set up child's trap frame */
     child->tf.c_trap_sp = proc_table[current_proc].tf.c_trap_sp;
     child->tf.c_trap = proc_table[current_proc].tf.c_trap;
-    child->tf.mepc = info.entry_point;
+    child->tf.epc = info.entry_point;
     child->tf.sp = sp;
     child->tf.ra = 0;  /* No return address */
     child->tf.a0 = (uint32_t)spawn_argc;
@@ -511,6 +510,7 @@ static int32_t sys_spawn(trap_frame_t *tf) {
     /* Set up parent-child relationship */
     child->parent = current_proc;
     child->state = PROC_RUNNING;
+    /* LIMITATIONS.md B15: the parent is suspended until the child exits */
     proc_table[current_proc].state = PROC_READY;
 
     /* Switch to child process */
@@ -528,7 +528,7 @@ static int32_t sys_spawn(trap_frame_t *tf) {
 /*
  * sys_readdir - List directory entries
  * a0 = path, a1 = dirent buffer, a2 = max_entries
- * Returns: number of entries read, or negative error
+ * Returns: number of entries in the directory, or negative error
  */
 static int32_t sys_readdir(trap_frame_t *tf) {
     const char *path = (const char *)tf->a0;
@@ -685,6 +685,8 @@ static int32_t sys_setenv(trap_frame_t *tf) {
     int idx;
     char *s;
 
+    if (strcmp(name, "CWD") == 0) { tf->a0 = tf->a1; return sys_chdir(tf); }
+
     if (nlen + 1 + vlen >= MAX_ENV_LEN) {
         vlen = MAX_ENV_LEN - nlen - 2;
         if (vlen < 0) return -1;
@@ -791,13 +793,6 @@ static int32_t sys_getenv_entry(trap_frame_t *tf) {
     return len;
 }
 
-/*
- * Dispatch a system call.
- * Returns 1 if the top-level program should exit (shell with no parent),
- * 0 otherwise.
- *
- * Note: sys_spawn and sys_exit may call trap_ret() directly and never return.
- */
 /*
  * sys_unlink - Delete a file
  * a0 = path
@@ -920,6 +915,13 @@ static int32_t sys_stat(trap_frame_t *tf) {
     return FS_OK;
 }
 
+/*
+ * Dispatch a system call.
+ * Returns 1 if the top-level program should exit (shell with no parent),
+ * 0 otherwise.
+ *
+ * Note: sys_spawn and sys_exit may call trap_ret() directly and never return.
+ */
 int syscall_dispatch(trap_frame_t *tf) {
     uint32_t syscall_num = tf->a7;
     int32_t result = 0;
@@ -1019,8 +1021,8 @@ int syscall_dispatch(trap_frame_t *tf) {
     /* Store return value in a0 */
     tf->a0 = (uint32_t)result;
 
-    /* Advance mepc past the ecall instruction (4 bytes) */
-    tf->mepc += 4;
+    /* Advance epc past the ecall instruction (4 bytes) */
+    tf->epc += 4;
 
     return 0;  /* Continue execution */
 }

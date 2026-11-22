@@ -28,6 +28,10 @@ void boot_main(void)
         boot_puts("BOOT: Invalid filesystem magic\n");
         boot_halt();
     }
+    if (sb.version != FS_VERSION) {
+        boot_puts("BOOT: Wrong filesystem version\n");
+        boot_halt();
+    }
 
     boot_puts("BOOT: Filesystem found\n");
 
@@ -71,6 +75,7 @@ void boot_main(void)
 
     {
         int b;
+        /* LIMITATIONS.md B16: direct blocks only */
         for (b = 0; b < DIRECT_BLOCKS && loaded < file_size; b++) {
             uint32_t chunk;
 

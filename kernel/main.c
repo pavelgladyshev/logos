@@ -8,7 +8,7 @@
 
 /* The name and the version of this logOS, printed when the kernel starts */
 #define LOGOS_NAME    "Belfield"
-#define LOGOS_VERSION "1.0.4"
+#define LOGOS_VERSION "1.1.0"
 
 #include "fs.h"
 #include "fs_globals.h"
@@ -23,9 +23,6 @@
 #define TRAP_STACK_SIZE 4096
 static uint8_t trap_stack[TRAP_STACK_SIZE] __attribute__((aligned(16)));
 
-/* Flag to indicate the current top-level program has exited */
-volatile int program_should_exit = 0;
-
 /* Assembly function to save kernel context and jump to user program */
 extern int run_user_program(trap_frame_t *tf);
 
@@ -37,14 +34,14 @@ extern int run_user_program(trap_frame_t *tf);
  * (never returning here) to switch between processes.
  */
 void c_trap_handler(trap_frame_t *tf) {
-    uint32_t cause = get_mcause();
+    uint32_t cause = get_cause();
 
+    /* LIMITATIONS.md B13: programs run in machine mode, like the kernel */
     if (cause == 11) {
         /* System call (ecall) - dispatch it */
         if (syscall_dispatch(tf)) {
             /* sys_exit was called by a process with no parent.
              * Return to run_user_program via restore_kernel_context. */
-            program_should_exit = 1;
             return;
         }
         /* Normal syscall - return to user program */
@@ -52,9 +49,9 @@ void c_trap_handler(trap_frame_t *tf) {
     } else if (cause & MCAUSE_INTERRUPT) {
         printf("KERNEL: Unexpected interrupt, mcause=0x%x\n", cause);
         trap_ret(tf);
-    } else if (tf->mepc < PROC_MEM_START) {
+    } else if (tf->epc < PROC_MEM_START) {
         /* An exception in the kernel itself is a kernel bug: stop. */
-        printf("KERNEL: Exception! mcause=%d, mepc=0x%x\n", cause, tf->mepc);
+        printf("KERNEL: Exception! mcause=%d, mepc=0x%x\n", cause, tf->epc);
         printf("KERNEL: Halting.\n");
         while (1) {}
     } else {
@@ -66,10 +63,9 @@ void c_trap_handler(trap_frame_t *tf) {
          * killed by a signal as 128 + the signal's number. */
         int status = 128 + (int)cause;
         printf("KERNEL: Exception! mcause=%d mepc=0x%x pid=%d - process killed, exit status %d\n",
-               cause, tf->mepc, proc_table[current_proc].pid, status);
+               cause, tf->epc, proc_table[current_proc].pid, status);
         if (kill_current_process(tf, status)) {
-            program_should_exit = 1;   /* it was the top-level shell */
-            return;
+            return;   /* it was the top-level shell */
         }
         /* not reached: sys_exit resumed the parent */
     }
@@ -91,9 +87,11 @@ int main(void)
     struct program_info info;
     int last_exit_code = 0;
 
+    /* LIMITATIONS.md B7: printed before console_dev_init, without the driver */
     printf("logOS " LOGOS_NAME "\nVersion " LOGOS_VERSION "\n\n");
 
     /* Initialize subsystems */
+    /* LIMITATIONS.md B4: the console is the only driver */
     console_dev_init();
     proc_init();
 
@@ -140,7 +138,7 @@ int main(void)
 
         /* Set up process state */
         setup_trap_frame(slot);
-        p->tf.mepc = info.entry_point;
+        p->tf.epc = info.entry_point;
         p->tf.ra = 0;
         p->tf.sp = p->stack_top;
         p->tf.a0 = 0;  /* argc = 0 */
@@ -151,7 +149,6 @@ int main(void)
 
         /* Start the process */
         current_proc = slot;
-        program_should_exit = 0;
         set_trap_handler(trap_handler, &p->tf);
         run_user_program(&p->tf);
 

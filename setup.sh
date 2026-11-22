@@ -201,11 +201,11 @@ fi
 
 # ---------------------------------------------------------------------------------------------
 step "LogOS boots in Logisim's text mode (on a copy of the disk image)"
-if [ -f "$jar" ] && [ -f block_storage.bin ] && [ -n "$v" ] && [ "$v" -ge 21 ]; then
+if [ -f "$jar" ] && [ -f boot-rom.txt ] && [ -f block_storage.bin ] && [ -n "$v" ] && [ "$v" -ge 21 ]; then
     tmp=$(mktemp -d "${TMPDIR:-/tmp}/logos-setup.XXXXXX")
-    cp computer.circ block_storage.bin "$tmp/"
+    cp computer.circ boot-rom.txt block_storage.bin "$tmp/"
     here=$(pwd)
-    ( cd "$tmp" && exec java -Djava.awt.headless=true -jar "$here/$jar" computer.circ --tty raw ) \
+    ( cd "$tmp" && exec java -Djava.awt.headless=true -jar "$here/$jar" computer.circ --tty raw --load boot-rom.txt ROM_1 ) \
         < /dev/null > "$tmp/console.txt" 2>&1 &
     pid=$!
     start=$(date +%s)
@@ -225,7 +225,7 @@ if [ -f "$jar" ] && [ -f block_storage.bin ] && [ -n "$v" ] && [ "$v" -ge 21 ]; 
     wait "$pid" 2>/dev/null
     rm -rf "${tmp:?}"
 else
-    bad "cannot try booting LogOS: needs Java 21, $jar and block_storage.bin"
+    bad "cannot try booting LogOS: needs Java 21, $jar, boot-rom.txt and block_storage.bin"
 fi
 
 # ---------------------------------------------------------------------------------------------

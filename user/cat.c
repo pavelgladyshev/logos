@@ -1,38 +1,33 @@
 /*
- * cat - read a file byte by byte and print to stdout
- * Used to test EOF handling on regular files.
+ * cat - print files
+ * Licensed under Creative Commons Attribution International License 4.0
+ *
+ * Usage: cat <file> [file2 ...]
  */
 
 #include "libc.h"
 
-int main(void) {
-    int fd;
+int main(int argc, char *argv[])
+{
+    int i, fd, ret = 0;
     char c;
-    int n;
-    int total = 0;
 
-    fd = open("/etc/hello.txt", O_RDONLY);
-    if (fd < 0) {
-        puts("cat: cannot open /etc/hello.txt");
+    if (argc < 2) {
+        puts("usage: cat <file> [file2 ...]");
         return 1;
     }
 
-    printf("cat: opened fd=%d, reading byte by byte...\n", fd);
-
-    while (1) {
-        n = read(fd, &c, 1);
-        if (n < 0) {
-            printf("cat: read error %d after %d bytes\n", n, total);
-            break;
+    for (i = 1; i < argc; i++) {
+        fd = open(argv[i], O_RDONLY);
+        if (fd < 0) {
+            printf("cat: cannot open '%s'\n", argv[i]);
+            ret = 1;
+            continue;
         }
-        if (n == 0) {
-            printf("\ncat: EOF after %d bytes\n", total);
-            break;
-        }
-        putchar(c);
-        total++;
+        while (read(fd, &c, 1) > 0)
+            putchar(c);
+        close(fd);
     }
 
-    close(fd);
-    return 0;
+    return ret;
 }

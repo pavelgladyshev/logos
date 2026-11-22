@@ -50,6 +50,7 @@ int block_write(uint32_t block_num, const void *buf) {
  * Bitmap operations for block allocation
  */
 
+/* LIMITATIONS.md B8: never called; reads the device on every call */
 int bitmap_get(uint32_t block) {
     uint32_t bitmap_block = sb.bitmap_start + (block / (BLOCK_SIZE * 8));
     uint32_t byte_offset = (block % (BLOCK_SIZE * 8)) / 8;
@@ -85,6 +86,7 @@ int bitmap_set(uint32_t block, int value) {
  * Block allocation
  */
 
+/* LIMITATIONS.md B8: tests one bit at a time */
 int block_alloc(void) {
     if (sb.free_blocks == 0) {
         return FS_ERR_NO_SPACE;

@@ -9,6 +9,7 @@
 
 /* Global filesystem state */
 struct superblock sb;
+/* LIMITATIONS.md B9: the one buffer of every layer */
 uint8_t block_buf[BLOCK_SIZE] __attribute__((aligned(4)));   /* word-aligned for memcpy */
 
 /*
@@ -151,6 +152,11 @@ int fs_open(const char *path, uint32_t *ino) {
             name[i++] = *p++;
         }
         name[i] = '\0';
+
+        /* A name this long cannot exist: dir_add refuses it */
+        if (*p != '\0' && *p != '/') {
+            return FS_ERR_NOT_FOUND;
+        }
 
         /* Skip trailing '/' */
         while (*p == '/') {

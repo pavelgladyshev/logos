@@ -9,6 +9,7 @@
 #ifndef SYSCALL_NR_H
 #define SYSCALL_NR_H
 
+/* LIMITATIONS.md B12: numbers 0 to 19 and no getpid */
 #define SYS_exit          0
 #define SYS_read          1
 #define SYS_write         2

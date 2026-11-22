@@ -10,6 +10,7 @@
 #include "console.h"
 #include "console_dev.h"
 
+/* LIMITATIONS.md B6: raw keys, no echo, no end of file */
 static int console_read(uint8_t minor, void *buf, uint32_t len) {
     uint8_t *dst = (uint8_t *)buf;
     uint32_t i = 0;
@@ -38,8 +39,6 @@ static int console_write(uint8_t minor, const void *buf, uint32_t len) {
 
 /* Console device operations - read/write terminal */
 static struct device_ops console_ops = {
-    .open  = 0,
-    .close = 0,
     .read  = console_read,
     .write = console_write
 };

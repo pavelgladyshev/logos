@@ -18,7 +18,6 @@ typedef int ssize_t;
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
 
-/* Open flags (simplified) */
 /* Open flags */
 #define O_RDONLY  0
 #define O_WRONLY  1
@@ -73,15 +72,15 @@ int chdir(const char *path);
 
 /* Directory entry structure (matches kernel's struct dirent) */
 struct dirent {
-    unsigned int inode;          /* Inode number (0 = entry is free) */
+    unsigned int inode;          /* Inode number (0xFFFFFFFF = entry is free) */
     char         name[MAX_FILENAME]; /* Filename (null-terminated) */
 };
 
 /* List directory entries.
- * path: absolute path to directory
+ * path: path to directory
  * entries: buffer to receive directory entries
  * max_entries: maximum number of entries to return
- * Returns: number of entries read, or negative error
+ * Returns: number of entries in the directory (only the first max_entries are stored), or negative error
  */
 int readdir(const char *path, struct dirent *entries, int max_entries);
 

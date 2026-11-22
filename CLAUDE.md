@@ -14,7 +14,8 @@ A bare-metal Unix-like OS for RISC-V, designed to run on a simulated RISC-V comp
 make                      # Build bootloader ROM image (boot-rom.txt)
 make all                  # Build everything: boot-rom.txt, kernel.bin, user programs, filesystem image
 make run                  # LogOS in Logisim's text mode (--tty raw); makes block_storage.bin only if missing
-make gui                  # computer.circ in Logisim's window (on WSL: Java for Windows if on PATH, else WSLg)
+make gui                  # computer-rom.circ in Logisim's window (on WSL: Java for Windows if on PATH, else WSLg)
+make check-rom            # computer.circ's ROM is empty, computer-rom.circ's holds boot-rom.txt (mkcircuit.py writes it)
 make logisim              # Fetch logisim-evolution-ucd-$(LOGISIM_VERSION)-all.jar from the releases
 make fstool               # Build native fstool utility for host system
 make logosfs              # Build fstool/logosfs, the FUSE driver (needs macFUSE or libfuse3)
@@ -59,7 +60,7 @@ truncating first, so `lfs_open` truncates as `sys_open` does.
 
 ```bash
 # Logisim (requires Java and Logisim Evolution)
-java -jar ~/logisim-evolution-ucd-5.0.9-all.jar computer.circ -t tty
+java -jar ~/logisim-evolution-ucd-5.0.10-all.jar computer-rom.circ --tty raw
 
 # Debugging: Logisim's CPU has a GDB server
 make debug                # LogOS in text mode, CPU waiting for gdb on port 3333
@@ -68,7 +69,7 @@ make openocd              # Tang Nano 20K, CPU with Debug Enable: OpenOCD (fpga/
 make fpga-gdb             # in another terminal: gdb to OpenOCD, port 3334
 ```
 
-Note: Before running Logisim without GUI, you must first load the bootloader ROM image (`boot-rom.txt`) into the ROM component and the filesystem image (`block_storage.bin`) into the block device via the GUI, then save the circuit.
+Note: the ROM of `computer.circ` is empty. `make run`, `gui` and `debug` run a copy, `computer-rom.circ` (`computer-gdb.circ` for `make debug`), with `boot-rom.txt` in its ROM (`mkcircuit.py` writes it); the Block Storage reads `block_storage.bin` beside the circuit.
 
 ## Architecture
 
@@ -91,7 +92,7 @@ Key modules organized by directory:
 | Trap Handling | `trap.S`, `trap.h` | Assembly trap handler, context save/restore |
 | Process Mgmt | `process.c/h` | Process table, slot allocation, per-process state |
 | System Calls | `syscall.c/h`, `syscall_nr.h` | Syscall dispatch, per-process file descriptors |
-| ELF Loader | `loader.c/h`, `loader_asm.S`, `elf.h` | Load ELF programs at arbitrary addresses |
+| ELF Loader | `loader.c/h`, `elf.h` | Load ELF programs at arbitrary addresses |
 | Kernel Entry | `crt0.S`, `kernel.lds` | Kernel entry point (in RAM), kernel linker script |
 | Kernel Main | `main.c` | Kernel initialization and shell restart loop |
 | **User** (`user/`) | | |
@@ -316,7 +317,7 @@ Update the `RISCV_TOOL_PREFIX` variable in the Makefile if your toolchain is in 
 - **Logisim**: RV32IM_Zicsr, ILP32 ABI
   - Bootloader: `boot/boot.lds` (ROM at 0x0, BSS at 0x001F0000)
   - Kernel: `kernel/kernel.lds` (loaded at 0x00100000)
-  - User programs: `user/user.lds` (linked at address 0, relocated at load time)
+  - User programs: `user/user.lds` (linked at address 0, moved to its slot at load time)
 - The `zicsr` extension is required for CSR instructions used in trap handling
 
 ## Known PIE Limitations

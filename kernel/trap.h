@@ -22,7 +22,7 @@ struct trap_frame {
     /*   0 */ uint32_t reserved1;
     /*   4 */ uint32_t c_trap_sp;    /* Stack pointer for C trap handler */
     /*   8 */ uint32_t c_trap;       /* Pointer to C trap handler function */
-    /*  12 */ uint32_t mepc;         /* Machine exception program counter */
+    /*  12 */ uint32_t epc;          /* Exception program counter (mepc) */
     /*  16 */ uint32_t reserved3;
     /*  20 */ uint32_t ra;           /* Return address */
     /*  24 */ uint32_t sp;           /* Stack pointer (user program) */
@@ -90,9 +90,9 @@ void disable_interrupts(void);
 void trap_handler(void);
 
 /*
- * Get value of mcause register (reason for trap).
+ * Get the cause of the trap (the mcause register).
  */
-uint32_t get_mcause(void);
+uint32_t get_cause(void);
 
 /*
  * Assembly routine to restore context and return from trap.

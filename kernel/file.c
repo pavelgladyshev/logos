@@ -42,6 +42,7 @@ int file_create(uint32_t dir_ino, const char *name) {
     return ino;
 }
 
+/* LIMITATIONS.md B5: no cache, every call reads the device */
 int file_read(uint32_t ino, uint32_t offset, void *buf, uint32_t len) {
     struct inode in;
 
@@ -192,7 +193,7 @@ int file_write(uint32_t ino, uint32_t offset, const void *buf, uint32_t len) {
                 /* Update inode with what we've written so far */
                 if (offset > in.size) in.size = offset;
                 inode_write(ino, &in);
-                return bytes_written > 0 ? bytes_written : new_block;
+                return bytes_written > 0 ? (int)bytes_written : new_block;
             }
             in.blocks[block_idx] = new_block;
         }

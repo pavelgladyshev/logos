@@ -82,6 +82,7 @@ static int parse_cmd(char *line, char *argv[], int max_args)
     int argc = 0;
     int in_word = 0;
 
+    /* LIMITATIONS.md B3: the last word takes the rest of the line */
     while (*line && argc < max_args - 1) {
         if (*line == ' ' || *line == '\t') {
             if (in_word) {
@@ -172,7 +173,9 @@ static void cmd_set(int argc, char *argv[])
             continue;
         }
         *eq = '\0';
-        setenv(argv[i], eq + 1);
+        if (setenv(argv[i], eq + 1) < 0) {
+            printf("set: %s: cannot set\n", argv[i]);
+        }
         *eq = '=';
     }
 }
@@ -233,6 +236,7 @@ static void run_external(int argc, char *argv[])
             path[sizeof(path) - 1] = '\0';
 
             result = spawn(path, argv);
+            /* LIMITATIONS.md B2: a negative exit status is taken for "not found" */
             if (result >= 0) {
                 /* Child ran and exited — exit code already in $? */
                 return;
@@ -269,6 +273,7 @@ int main(int argc, char *argv[])
         /* Skip empty lines */
         if (line[0] == '\0') continue;
 
+        /* LIMITATIONS.md B3: no comments, ;, quotes or redirection */
         /* Expand $VAR references */
         expand_vars(line, expanded, MAX_CMD_LEN);
 
